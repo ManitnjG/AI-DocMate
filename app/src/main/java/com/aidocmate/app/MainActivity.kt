@@ -1,7 +1,9 @@
 package com.aidocmate.app
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
-import android.net.Uri
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -9,57 +11,135 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
-import com.tom_roush.pdfbox.pdmodel.PDDocument
-import com.tom_roush.pdfbox.text.PDFTextStripper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 
-class MainActivity: ComponentActivity() {
- override fun onCreate(b: Bundle?) { super.onCreate(b); PDFBoxResourceLoader.init(applicationContext); setContent { MaterialTheme { DocMateApp(applicationContext) } } }
-}
-
-private suspend fun extractPdf(context: Context, uri: Uri): String = withContext(Dispatchers.IO) {
- val tmp=File.createTempFile("docmate",".pdf",context.cacheDir)
- context.contentResolver.openInputStream(uri)!!.use { i->tmp.outputStream().use{i.copyTo(it)} }
- PDDocument.load(tmp).use { PDFTextStripper().getText(it) }.also { tmp.delete() }
-}
-private fun details(t:String):String {
- val dates=Regex("""\b(?:\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4})\b""",RegexOption.IGNORE_CASE).findAll(t).map{it.value}.distinct().take(15).toList()
- val money=Regex("""(?:₹|Rs\.?|INR)\s?[\d,]+(?:\.\d{1,2})?""",RegexOption.IGNORE_CASE).findAll(t).map{it.value}.distinct().take(15).toList()
- return "Dates: "+(dates.ifEmpty{listOf("None detected")}.joinToString())+"\n\nAmounts: "+(money.ifEmpty{listOf("None detected")}.joinToString())
-}
-private fun localSummary(t:String):String {
- val clean=t.replace(Regex("\\s+")," ").trim()
- if(clean.isBlank()) return "No selectable text was found. This may be a scanned PDF; OCR support is required."
- val sentences=clean.split(Regex("(?<=[.!?])\\s+")).filter{it.length>30}
- return sentences.take(8).joinToString("\n\n").take(5000)
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        PDFBoxResourceLoader.init(applicationContext)
+        setContent { MaterialTheme { DocMateApp(this) } }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable fun DocMateApp(context:Context) {
- var text by remember{mutableStateOf("")}; var name by remember{mutableStateOf("No document selected")}; var output by remember{mutableStateOf("Import a PDF to begin.")}; var busy by remember{mutableStateOf(false)}
- val scope=rememberCoroutineScope()
- val picker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){uri->
-  if(uri!=null){ name=uri.lastPathSegment?:"Document"; busy=true; scope.launch { runCatching{extractPdf(context,uri)}.onSuccess{text=it;output="Document loaded: "+it.length+" characters extracted."}.onFailure{output="Could not read PDF: "+(it.message?:"unknown error")}; busy=false } }
- }
- Scaffold(topBar={TopAppBar(title={Text("AI DocMate")})}){p->
-  Column(Modifier.padding(p).padding(16.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)){
-   Text("Understand documents faster",style=MaterialTheme.typography.headlineSmall); Text(name)
-   Button({picker.launch(arrayOf("application/pdf"))},Modifier.fillMaxWidth()){Text("Upload PDF")}
-   if(busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-   OutlinedButton({output=localSummary(text)},Modifier.fillMaxWidth(),enabled=text.isNotBlank()){Text("Smart Summary")}
-   OutlinedButton({output=details(text)},Modifier.fillMaxWidth(),enabled=text.isNotBlank()){Text("Extract dates & amounts")}
-   OutlinedButton({output=text.take(7000)},Modifier.fillMaxWidth(),enabled=text.isNotBlank()){Text("View extracted text")}
-   HorizontalDivider(); Text("Result",style=MaterialTheme.typography.titleMedium); Text(output)
-   HorizontalDivider(); Text("Privacy: PDF processing in this build happens on your device. AI cloud features will only be enabled through a secure backend.")
-  }
- }
+@Composable
+fun DocMateApp(context: Context) {
+    val store = remember { DocumentStore(context) }
+    val prefs = remember { context.getSharedPreferences("settings", Context.MODE_PRIVATE) }
+    val scope = rememberCoroutineScope()
+    var history by remember { mutableStateOf(emptyList<SavedDoc>()) }
+    var doc by remember { mutableStateOf<SavedDoc?>(null) }
+    var output by remember { mutableStateOf("Import a PDF or image to begin.") }
+    var busy by remember { mutableStateOf(false) }
+    var question by remember { mutableStateOf("") }
+    var endpoint by remember { mutableStateOf(prefs.getString("endpoint", "") ?: "") }
+    var token by remember { mutableStateOf(SecretStore.read(context)) }
+    var language by remember { mutableStateOf(prefs.getString("language", "English") ?: "English") }
+    var settings by remember { mutableStateOf(false) }
+    var cloudConsent by remember { mutableStateOf(false) }
+    var pendingSummary by remember { mutableStateOf(false) }
+    var rename by remember { mutableStateOf(false) }
+    var newName by remember { mutableStateOf("") }
+    var deleteTarget by remember { mutableStateOf<SavedDoc?>(null) }
+    var search by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) { history = withContext(Dispatchers.IO) { store.list() } }
+    suspend fun saveResult(result: String) {
+        output = result
+        doc?.let { current ->
+            val updated = current.copy(result = result)
+            withContext(Dispatchers.IO) { store.save(updated) }
+            doc = updated
+            history = withContext(Dispatchers.IO) { store.list() }
+        }
+    }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null && !busy) {
+            doc = null; output = "Reading document…"; busy = true
+            scope.launch {
+                try { doc = store.import(uri); output = "Loaded ${doc!!.pages.size} pages. Ask a question or view the source text."; history = withContext(Dispatchers.IO) { store.list() } }
+                catch (e: Exception) { output = "Import failed: ${e.message}" }
+                finally { busy = false }
+            }
+        }
+    }
+    val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        if (uri != null) { val snapshot = output; scope.launch {
+            try { withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(snapshot) } ?: error("Cannot write file") } }
+            catch (e: Exception) { output = "Export failed: ${e.message}" }
+        } }
+    }
+    if (settings) AlertDialog(onDismissRequest = { settings = false }, title = { Text("AI connection") }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Use your deployed DocMate HTTPS server and personal access token. Provider API keys belong only on the server.")
+            OutlinedTextField(endpoint, { endpoint = it }, label = { Text("Backend URL") }, singleLine = true)
+            OutlinedTextField(token, { token = it }, label = { Text("Access token") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
+            Text("Documents and results are stored privately on this device. Delete documents from history to remove them. Cloud requests send extracted text only after confirmation.")
+        }
+    }, confirmButton = { TextButton(onClick = {
+        runCatching { SecretStore.write(context, token); prefs.edit().putString("endpoint", endpoint).apply() }.onFailure { output = "Could not save settings: ${it.message}" }
+        settings = false
+    }) { Text("Save") } }, dismissButton = { TextButton(onClick = { settings = false }) { Text("Close") } })
+    if (cloudConsent) AlertDialog(onDismissRequest = { cloudConsent = false }, title = { Text("Send document text to AI?") }, text = {
+        Text("Extracted text will be sent to $endpoint and its AI provider. Only continue if you are comfortable sharing this document. Source excerpts remain available offline.")
+    }, confirmButton = { TextButton(onClick = {
+        cloudConsent = false
+        val current = doc
+        if (current != null) { busy = true; scope.launch {
+            try { saveResult(AiClient.ask(endpoint, token, current.pages, if (pendingSummary) "Summarize the key points, dates, amounts and action items." else question, language, pendingSummary)) }
+            catch (e: Exception) { output = "Could not complete request: ${e.message}. Your document is saved; you can retry." }
+            finally { busy = false }
+        } }
+    }) { Text("Continue") } }, dismissButton = { TextButton(onClick = { cloudConsent = false }) { Text("Cancel") } })
+    if (rename) AlertDialog(onDismissRequest = { rename = false }, title = { Text("Rename document") }, text = { OutlinedTextField(newName, { newName = it.take(160) }) }, confirmButton = {
+        TextButton(onClick = { doc?.let { current -> scope.launch { try { val updated = current.copy(name = newName.trim().ifBlank { current.name }); withContext(Dispatchers.IO) { store.save(updated) }; doc = updated; history = withContext(Dispatchers.IO) { store.list() } } catch(e: Exception) { output = "Rename failed: ${e.message}" } } }; rename = false }) { Text("Save") }
+    })
+    deleteTarget?.let { target -> AlertDialog(onDismissRequest = { deleteTarget = null }, title = { Text("Delete ${target.name}?") }, text = { Text("Removes saved text and results from this device.") }, confirmButton = {
+        TextButton(onClick = { deleteTarget = null; scope.launch { try { withContext(Dispatchers.IO) { store.delete(target) }; history = withContext(Dispatchers.IO) { store.list() }; if (doc?.id == target.id) { doc = null; output = "Document deleted." } } catch(e: Exception) { output = "Delete failed: ${e.message}" } } }) { Text("Delete") }
+    }, dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Cancel") } }) }
+    Scaffold(topBar = { TopAppBar(title = { Text("AI DocMate") }, actions = { TextButton(onClick = { settings = true }, enabled = !busy) { Text("Settings") } }) }) { padding ->
+        Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Your documents, explained", style = MaterialTheme.typography.headlineSmall)
+            Text("PDF and image import • private local history • answers with sources")
+            Button(onClick = { picker.launch(arrayOf("application/pdf", "image/jpeg", "image/png")) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Import PDF or photo") }
+            Text("Up to 25 MB / 100 PDF pages. Scan recognition: Latin text. Selectable Tamil PDF text can be used with cloud AI.", style = MaterialTheme.typography.bodySmall)
+            if (busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Processing… Please keep the app open.") }
+            doc?.let { current ->
+                Text(current.name, style = MaterialTheme.typography.titleLarge)
+                Row { TextButton(onClick = { newName = current.name; rename = true }, enabled = !busy) { Text("Rename") }
+                    TextButton(onClick = { deleteTarget = current }, enabled = !busy) { Text("Delete") } }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("English", "Tamil").forEach { lang -> FilterChip(selected = language == lang, onClick = { language = lang; prefs.edit().putString("language", lang).apply() }, label = { Text(lang) }, enabled = !busy) }
+                }
+                OutlinedTextField(question, { question = it.take(2000) }, modifier = Modifier.fillMaxWidth(), label = { Text("Ask about this document") }, enabled = !busy)
+                Button(onClick = { pendingSummary = false; cloudConsent = true }, enabled = !busy && question.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Ask AI") }
+                OutlinedButton(onClick = { pendingSummary = true; cloudConsent = true }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("AI summary") }
+                OutlinedButton(onClick = { scope.launch { try { saveResult(current.pages.joinToString("\n\n") { "Page ${it.number}\n${DocTools.extract(it.text)}" }) } catch(e: Exception) { output = "Save failed: ${e.message}" } } }, enabled = !busy) { Text("Extract dates, amounts & phones offline") }
+                OutlinedButton(onClick = { output = current.pages.joinToString("\n\n") { "Page ${it.number}\n${it.text}" } }, enabled = !busy) { Text("View source text") }
+            }
+            HorizontalDivider()
+            Text("Result", style = MaterialTheme.typography.titleMedium)
+            SelectionContainer { Text(output) }
+            Row {
+                TextButton(onClick = { (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("DocMate", output)) }) { Text("Copy") }
+                TextButton(onClick = { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, output.take(100000)) }, "Share result")) }) { Text("Share") }
+                TextButton(onClick = { exporter.launch("DocMate-result.txt") }) { Text("Export TXT") }
+            }
+            HorizontalDivider()
+            Text("Saved documents (${history.size})", style = MaterialTheme.typography.titleLarge)
+            OutlinedTextField(search, { search = it }, label = { Text("Search document names") }, modifier = Modifier.fillMaxWidth())
+            history.filter { it.name.contains(search, true) }.forEach { item ->
+                OutlinedButton(onClick = { doc = item; output = item.result.ifBlank { "Loaded ${item.pages.size} pages." }; question = "" }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text(item.name) }
+            }
+        }
+    }
 }
