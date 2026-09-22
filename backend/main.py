@@ -1,6 +1,7 @@
 """Document Q&A API. Run behind HTTPS; provision individual access tokens externally."""
 import asyncio
 import hashlib
+import logging
 import os
 import re
 import secrets
@@ -11,6 +12,8 @@ import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 import sessions
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger("uvicorn.error")
 
 app = FastAPI(title="AI DocMate", version="0.3.0")
 WINDOW = 60
@@ -96,10 +99,13 @@ async def complete(context, question, language):
                     if attempt == 0:
                         await asyncio.sleep(0.5)
                         continue
+                if r.is_error:
+                    logger.warning("DocMate AI provider HTTP status=%s", r.status_code)
                 r.raise_for_status()
                 answer = r.json()["choices"][0]["message"]["content"]
                 return answer if isinstance(answer, str) and answer.strip() else None
-        except (httpx.HTTPError, ValueError, KeyError, IndexError):
+        except (httpx.HTTPError, ValueError, KeyError, IndexError) as exc:
+            logger.warning("DocMate AI request failed type=%s", type(exc).__name__)
             if attempt == 0:
                 continue
     return None
@@ -138,6 +144,7 @@ async def ask(x: Ask):
         valid = {c["page"] for c in selected}
         cited = {int(n) for n in re.findall(r"\[p\.(\d+)\]", answer)}
         if not cited or not cited.issubset(valid):
+            logger.warning("DocMate AI response rejected: missing or invalid page citations")
             answer = None
     return {"answer": answer or "AI unavailable. These are matching source excerpts, not an AI answer:\n\n" + context,
             "provider": "openrouter" if answer else "extractive", "sources": selected}
