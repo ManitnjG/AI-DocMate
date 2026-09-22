@@ -38,5 +38,5 @@ class EditorDraftStore(context: Context) {
         val out = state.startWrite()
         try { out.write(bytes); state.finishWrite(out) } catch (e: Exception) { state.failWrite(out); throw e }
     }
-    fun clear() { state.delete(); dir.listFiles()?.filter { it.extension == "pdf" }?.forEach { check(it.delete()) { "Cannot remove draft" } } }
+    fun clear() { state.delete(); File(dir,"fonts").deleteRecursively(); dir.listFiles()?.filter { it.extension == "pdf" }?.forEach { check(it.delete()) { "Cannot remove draft" } } }
 }

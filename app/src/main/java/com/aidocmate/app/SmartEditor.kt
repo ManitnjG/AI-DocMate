@@ -176,12 +176,12 @@ import kotlin.math.min
         if(value.kind in listOf("text","replace")) {
             OutlinedTextField(value.text,{value=value.copy(text=it.take(4000))},label={Text("Text")},modifier=Modifier.fillMaxWidth())
             Text("Font size");Slider(value.size,{value=value.copy(size=it)},valueRange=.005f..0.1f)
-            Row(Modifier.horizontalScroll(rememberScrollState())) { listOf("sans-serif","serif","monospace","cursive").forEach { name->FilterChip(selected=value.family==name,onClick={value=value.copy(family=name)},label={Text(name)}) } }
+            Row(Modifier.horizontalScroll(rememberScrollState())) { listOf("sans-serif","serif","monospace","cursive").forEach { name->FilterChip(selected=value.family==name,onClick={value=value.copy(family=name,fontKey="")},label={Text(name)}) } }
             Row { FilterChip(selected=value.bold,onClick={value=value.copy(bold=!value.bold)},label={Text("Bold")});FilterChip(selected=value.italic,onClick={value=value.copy(italic=!value.italic)},label={Text("Italic")}) }
         }
         Text("Colour")
         Row(Modifier.horizontalScroll(rememberScrollState())) { listOf("Black" to 0xFF111111.toInt(),"Blue" to 0xFF1749C9.toInt(),"Red" to 0xFFC52222.toInt(),"Yellow" to 0xFFFFCC00.toInt()).forEach { (name,color)->TextButton(onClick={value=value.copy(color=color)}){Text(name)} } }
-        if(value.kind=="replace") { Text("Font and background are estimates. Complex backgrounds may need manual retouching.",style=MaterialTheme.typography.bodySmall);TextButton(onClick={value=value.copy(background=0xFFFFFFFF.toInt())}){Text("Use white background") } }
+        if(value.kind=="replace") { Text(if(value.fontKey.isNotEmpty()) "Embedded font available. New characters may fall back if missing from that font. Review the background." else "Font and background are estimates. Complex backgrounds may need manual retouching.",style=MaterialTheme.typography.bodySmall);TextButton(onClick={value=value.copy(background=0xFFFFFFFF.toInt())}){Text("Use white background") } }
         if(value.kind!="ink") {
             Text("Horizontal position");Slider(value.left,{x->val width=value.right-value.left;value=value.copy(left=x,right=(x+width).coerceAtMost(1f))},valueRange=0f..0.9f)
             Text("Vertical position");Slider(value.top,{y->val height=value.bottom-value.top;value=value.copy(top=y,bottom=(y+height).coerceAtMost(1f))},valueRange=0f..0.9f)

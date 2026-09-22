@@ -49,6 +49,21 @@ class EditorIntegrationTest {
             } } }
         } finally { file.delete();output.delete() }
     }
+    @Test fun importWorkerPersistsResultAndDoesNotDuplicateOnRetry() = kotlinx.coroutines.runBlocking {
+        val file=source()
+        val id=AssistantJobStore(context).use { it.create("",android.net.Uri.fromFile(file).toString(),"eng",false,"import") }
+        try {
+            val worker=androidx.work.testing.TestListenableWorkerBuilder<AssistantWorker>(context)
+                .setInputData(androidx.work.workDataOf("job" to id)).build()
+            assertEquals(androidx.work.ListenableWorker.Result.success(),worker.doWork())
+            assertEquals(androidx.work.ListenableWorker.Result.success(),worker.doWork())
+            AssistantJobStore(context).use { db->assertEquals("completed",db.get(id)!!.status);assertEquals(id,db.get(id)!!.docId) }
+            val documents=DocumentStore(context)
+            assertEquals(1,documents.list().count { it.id==id })
+            assertTrue(documents.get(id)!!.pages.first().text.contains("Original invoice"))
+            documents.delete(documents.get(id)!!)
+        } finally { AssistantJobStore(context).use { it.deleteDocument(id) };file.delete() }
+    }
     @Test fun conversationAndCancellationSurviveDatabaseReopen() {
         val docId=java.util.UUID.randomUUID().toString()
         val id=AssistantJobStore(context).use { it.create(docId,"When?","English",false) }

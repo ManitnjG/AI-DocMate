@@ -20,10 +20,10 @@ object EditorRenderer {
                 it.eraseColor(Color.WHITE); p.render(it,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
             }
         } } }
-        if (marks) drawMarks(Canvas(bitmap), bitmap.width, bitmap.height, page.marks)
+        if (marks) drawMarks(Canvas(bitmap), bitmap.width, bitmap.height, page.marks,File(source.parentFile,"fonts"))
         return bitmap
     }
-    fun drawMarks(canvas: Canvas, width: Int, height: Int, marks: List<EditorMark>) {
+    fun drawMarks(canvas: Canvas, width: Int, height: Int, marks: List<EditorMark>, fonts: File? = null) {
         val w = width.toFloat(); val h = height.toFloat()
         marks.forEach { mark ->
             val rect = RectF(mark.left*w,mark.top*h,mark.right*w,mark.bottom*h)
@@ -40,6 +40,13 @@ object EditorRenderer {
                     val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                         color = mark.color; textSize = mark.size*h
                         typeface = Typeface.create(mark.family,when { mark.bold && mark.italic -> Typeface.BOLD_ITALIC; mark.bold -> Typeface.BOLD; mark.italic -> Typeface.ITALIC; else -> Typeface.NORMAL })
+                    }
+                    if(mark.fontKey.isNotEmpty() && fonts!=null) {
+                        val file=File(fonts,"${mark.fontKey}.font")
+                        if(file.isFile) runCatching { Typeface.createFromFile(file) }.getOrNull()?.let { embedded->
+                            val probe=Paint().apply{typeface=embedded}
+                            if(mark.text.filterNot{it.isWhitespace()}.all{probe.hasGlyph(it.toString())}) textPaint.typeface=embedded
+                        }
                     }
                     val layout = StaticLayout.Builder.obtain(mark.text,0,mark.text.length,textPaint,rect.width().toInt().coerceAtLeast(1))
                         .setAlignment(Layout.Alignment.ALIGN_NORMAL).setIncludePad(false).build()

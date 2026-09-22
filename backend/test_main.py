@@ -61,6 +61,23 @@ class ApiTests(unittest.TestCase):
         self.payload['history']=[{'question':'Q','answer':'A'}]*5
         self.assertEqual(self.client.post('/ask',json=self.payload,headers=self.headers).status_code,422)
 
+    def test_fast_provider_wins_and_slow_provider_is_cancelled(self):
+        import asyncio
+        from main import complete
+        cancelled=[]
+        async def provider(context,question,language,name,*args):
+            if name=='groq':
+                return 'Payment is due [p.1]'
+            try:
+                await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                cancelled.append(name)
+                raise
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'test','GROQ_API_KEY':'test'}), patch('main.complete_with_provider',new=provider):
+            result=asyncio.run(complete('[p.1] Payment due tomorrow','When?','English'))
+        self.assertEqual(result[1],'groq')
+        self.assertIn('openrouter',cancelled)
+
     def test_rate_limit(self):
         self.payload['question'] = 'bananas'
         for _ in range(10):

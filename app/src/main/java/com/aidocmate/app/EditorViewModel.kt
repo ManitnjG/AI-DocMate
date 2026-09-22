@@ -67,7 +67,7 @@ class EditorViewModel(app: Application): AndroidViewModel(app) {
             message="Finding text regions…"
             ocr=withContext(Dispatchers.IO) {
                 val bitmap=EditorRenderer.render(current.source,current.edits.pages[current.selected],2200)
-                try { EditorOcr.lines(getApplication(),bitmap,language) } finally { bitmap.recycle() }
+                try { EditorFontMatcher.match(current.source,current.edits.pages[current.selected].source,EditorOcr.lines(getApplication(),bitmap,language)) } finally { bitmap.recycle() }
             }
             message="${ocr.size} text regions. Tap a box to edit. Font and background are estimated; review the preview."
         }

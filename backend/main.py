@@ -18,7 +18,7 @@ logger = logging.getLogger("uvicorn.error")
 
 app = FastAPI(title="AI DocMate", version="0.3.0")
 WINDOW = 60
-AI_DEADLINE_SECONDS = 65
+AI_DEADLINE_SECONDS = 28
 requests = defaultdict(deque)
 
 class Page(BaseModel):
@@ -93,10 +93,10 @@ async def complete_with_provider(context, question, language, provider, key, mod
               "Use only supplied evidence; if unsupported say Not found in the document. "
               "Cite every factual claim with [p.N]. Do not invent citations. Answer in " + language + ".")
     headers = {"Authorization": "Bearer " + key, "Content-Type": "application/json"}
-    payload = {"model": model, "max_tokens": 1800,
+    payload = {"model": model, "max_tokens": 1200,
                "messages": [{"role": "system", "content": system},
                             {"role": "user", "content": "EXCERPTS:\n" + context + "\nQUESTION:\n" + question}]}
-    async with httpx.AsyncClient(timeout=20) as client:
+    async with httpx.AsyncClient(timeout=12) as client:
         r = await client.post(url, headers=headers, json=payload)
         if r.is_error:
             logger.warning("DocMate %s provider HTTP status=%s", provider, r.status_code)
@@ -110,17 +110,33 @@ async def complete(context, question, language):
         providers.append(("openrouter", os.getenv("OPENROUTER_API_KEY"), os.getenv("OPENROUTER_MODEL", "openrouter/free"), "https://openrouter.ai/api/v1/chat/completions"))
     if os.getenv("GROQ_API_KEY"):
         providers.append(("groq", os.getenv("GROQ_API_KEY"), os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"), "https://api.groq.com/openai/v1/chat/completions"))
-    for provider, key, model, url in providers:
+    async def try_provider(spec):
+        provider, key, model, url = spec
+        valid_pages = {int(n) for n in re.findall(r"\[p\.(\d+)\]", context)}
         for attempt in range(2):
             try:
                 answer = await complete_with_provider(context, question, language, provider, key, model, url)
-                if answer:
+                cited = {int(n) for n in re.findall(r"\[p\.(\d+)\]", answer or "")}
+                if answer and cited and cited.issubset(valid_pages):
                     return answer, provider
             except (httpx.HTTPError, ValueError, KeyError, IndexError) as exc:
                 logger.warning("DocMate %s request failed type=%s", provider, type(exc).__name__)
-                if attempt == 0:
-                    await asyncio.sleep(0.5)
-    return None, None
+            if attempt == 0:
+                await asyncio.sleep(0.25)
+        return None, None
+
+    tasks = [asyncio.create_task(try_provider(spec)) for spec in providers]
+    try:
+        for future in asyncio.as_completed(tasks):
+            answer, provider = await future
+            if answer:
+                return answer, provider
+        return None, None
+    finally:
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 @app.post("/session")
 def create_session(request: Request):
