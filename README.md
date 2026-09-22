@@ -29,11 +29,11 @@ The owner activates the service once using [backend setup](backend/README.md). C
 Java 17, Android SDK 35 and Gradle 8.9: `gradle testDebugUnitTest assembleDebug lintDebug`. GitHub Actions uploads `AI-DocMate-debug-apk` after successful checks. The repository does not yet include a Gradle wrapper.
 
 ## Known limits / remaining release work
-- Tamil and other Indian-language OCR is available in Document Scanner through downloadable Tesseract packs. The older AI document import path still uses Latin-only ML Kit scan OCR.
+- Tamil and other Indian-language OCR is available in both Document Scanner and AI document import through downloadable Tesseract packs. Choose the OCR language and download its packs before importing scanned files. Recognition quality still requires review.
 - The Document Scanner provides crop/perspective correction, multi-page capture and OCR. The older basic camera button remains a simple photo-to-PDF path.
 - Summaries have an explicit size limit; Q&A uses lexical retrieval across the whole accepted document.
-- Conversation threads, DOCX export, semantic retrieval, background processing and arbitrary page-range export remain future work. Offline multi-document comparison and text/CSV exports are implemented.
-- Smart Editor does not yet replace existing text, perform Indic OCR, add annotations/signatures, or preserve an unsaved editing session across activity recreation. Export before leaving the workspace. PDF export is not a secure-redaction workflow.
+- Conversation threads, semantic retrieval and background processing remain future work. Genuine Unicode DOCX result export and arbitrary page-range PDF export are implemented. Offline multi-document comparison and text/CSV exports are implemented.
+- Smart Editor does not yet replace existing text, perform Indic OCR, add annotations/signatures, or provide durable editing drafts after explicitly leaving the editor. Page edits, selection, undo/redo history and pending camera paths are restored across activity recreation while the cached source remains available. Export before leaving the workspace. PDF export is not a secure-redaction workflow.
 - Merge starts from an empty workspace; reopen Smart Editor to combine another set. Physical-device verification of camera, preview and exports remains required.
 - Keep the app open while processing. Latest results are saved, but an in-flight request is not restored after activity recreation.
 - Saved documents use app-private storage, not additional database encryption. Backups are disabled. Access tokens use Keystore encryption.

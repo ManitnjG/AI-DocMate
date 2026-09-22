@@ -16,6 +16,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.asImageBitmap
@@ -63,10 +66,12 @@ private fun loadEditorSource(context: Context, uri: Uri): File {
     var scannerOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     if (scannerOpen) { com.aidocmate.app.scan.ScannerScreen(context as androidx.activity.ComponentActivity) { scannerOpen = false }; return }
     val scope = rememberCoroutineScope()
-    var source by remember { mutableStateOf<File?>(null) }
-    var edits by remember { mutableStateOf<PageEdits?>(null) }
+    val fileSaver = Saver<File?, String>(save = { it?.path ?: "" }, restore = { path -> path.takeIf { it.isNotEmpty() }?.let(::File) })
+    var source by rememberSaveable(stateSaver = fileSaver) { mutableStateOf<File?>(null) }
+    val editsSaver = listSaver<PageEdits?, String>(save = { it?.snapshot() ?: emptyList() }, restore = { if (it.isEmpty()) null else PageEdits.restore(it) })
+    var edits by rememberSaveable(stateSaver = editsSaver) { mutableStateOf<PageEdits?>(null) }
     var revision by remember { mutableIntStateOf(0) }
-    var selected by remember { mutableIntStateOf(0) }
+    var selected by rememberSaveable { mutableIntStateOf(0) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("Open a PDF or image. Export saves a separate PDF; the original stays unchanged.") }
     var preview by remember { mutableStateOf<Bitmap?>(null) }
@@ -79,13 +84,17 @@ private fun loadEditorSource(context: Context, uri: Uri): File {
         onDismissRequest = { confirmClose = false },
         title = { Text("Close editor?") },
         text = { Text("Export your PDF before closing. Unsaved changes will be discarded; original files stay unchanged.") },
-        confirmButton = { TextButton(onClick = onBack) { Text("Close editor") } },
+        confirmButton = { TextButton(onClick = { source?.delete(); source = null; edits = null; onBack() }) { Text("Close editor") } },
         dismissButton = { TextButton(onClick = { confirmClose = false }) { Text("Keep editing") } }
     )
-    DisposableEffect(Unit) { onDispose { source?.delete() } }
-    var exportOnlyPage by remember { mutableStateOf(false) }
-    var cameraFile by remember { mutableStateOf<File?>(null) }
-    DisposableEffect(Unit) { onDispose { cameraFile?.delete() } }
+    LaunchedEffect(Unit) {
+        if (source != null && source?.isFile != true) {
+            source = null; edits = null; selected = 0
+            message = "The temporary source is no longer available. Please open the original again."
+        }
+    }
+    var exportOnlyPage by rememberSaveable { mutableStateOf(false) }
+    var cameraFile by rememberSaveable(stateSaver = fileSaver) { mutableStateOf<File?>(null) }
     fun openSource(uri: Uri) {
         busy = true
         scope.launch {
@@ -154,8 +163,11 @@ private fun loadEditorSource(context: Context, uri: Uri): File {
             }
         }
     }
+    var exportRange by rememberSaveable { mutableStateOf("") }
+    var rangeDialog by rememberSaveable { mutableStateOf(false) }
+    var rangeError by remember { mutableStateOf<String?>(null) }
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
-        val file = source; val pages = edits?.pages?.let { if (exportOnlyPage) listOf(it[selected]) else it.toList() }
+        val file = source; val pages = edits?.pages?.let { if (exportRange.isNotBlank()) PageRanges.parse(exportRange, it.size).map { index -> it[index] } else if (exportOnlyPage) listOf(it[selected]) else it.toList() }
         if (uri != null && file != null && pages != null) { busy = true; scope.launch {
             try { withContext(Dispatchers.IO) {
                 PDDocument.load(file).use { original -> PDDocument().use { result ->
@@ -165,6 +177,19 @@ private fun loadEditorSource(context: Context, uri: Uri): File {
             }; message = "PDF exported successfully." } catch (e: Exception) { message = "Export failed: ${e.message}. Choose a new destination and retry." } finally { busy = false }
         } }
     }
+    if (rangeDialog) AlertDialog(
+        onDismissRequest = { rangeDialog = false },
+        title = { Text("Export page range") },
+        text = { Column {
+            OutlinedTextField(exportRange, { exportRange = it.take(1000); rangeError = null }, label = { Text("Pages, e.g. 1-3, 5") }, isError = rangeError != null)
+            rangeError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        } },
+        confirmButton = { TextButton(onClick = {
+            try { PageRanges.parse(exportRange, edits?.pages?.size ?: 0); rangeDialog = false; exportOnlyPage = false; exporter.launch("DocMate-pages.pdf") }
+            catch (e: IllegalArgumentException) { rangeError = e.message }
+        }) { Text("Export") } },
+        dismissButton = { TextButton(onClick = { rangeDialog = false }) { Text("Cancel") } }
+    )
     LaunchedEffect(source, selected, revision) {
         val file = source ?: return@LaunchedEffect
         val pageSpec = edits?.pages?.getOrNull(selected) ?: return@LaunchedEffect
@@ -180,14 +205,14 @@ private fun loadEditorSource(context: Context, uri: Uri): File {
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row { TextButton(onClick = { requestClose() }, enabled = !busy) { Text("Back") }; Text("Smart Editor", style = MaterialTheme.typography.headlineSmall) }
         Row { Button(onClick = { picker.launch(arrayOf("application/pdf", "image/jpeg", "image/png")) }, enabled = !busy && source == null) { Text("Open") }
-            TextButton(onClick = { exportOnlyPage = false; exporter.launch("DocMate-edited.pdf") }, enabled = source != null && !busy) { Text("Export PDF") } }
+            TextButton(onClick = { exportRange = ""; exportOnlyPage = false; exporter.launch("DocMate-edited.pdf") }, enabled = source != null && !busy) { Text("Export PDF") } }
         Row(Modifier.horizontalScroll(rememberScrollState())) {
             TextButton(onClick = { scannerOpen = true }, enabled = !busy && source == null) { Text("Document scanner") }
             TextButton(onClick = { cameraPermission.launch(android.Manifest.permission.CAMERA) }, enabled = !busy && source == null) { Text("Capture photo") }
             TextButton(onClick = { merger.launch(arrayOf("application/pdf", "image/jpeg", "image/png")) }, enabled = !busy && source == null) { Text("Merge PDFs / photos") }
         }
         Text(message, style = MaterialTheme.typography.bodySmall)
-        if (source != null) Text("Export before closing or rotating your device.", style = MaterialTheme.typography.labelSmall)
+        if (source != null) Text("Edits and undo history survive device rotation. Export before closing.", style = MaterialTheme.typography.labelSmall)
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().pointerInput(source, selected) { detectTransformGestures { _, pan, scale, _ -> zoom = (zoom * scale).coerceIn(1f, 5f); panX = (panX + pan.x).coerceIn(-2000f, 2000f); panY = (panY + pan.y).coerceIn(-2000f, 2000f) } }) {
             preview?.let { bitmap -> Image(bitmap.asImageBitmap(), "Page ${selected + 1}", Modifier.fillMaxSize().graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = panX; translationY = panY; rotationZ = (edits?.pages?.getOrNull(selected)?.rotation ?: 0).toFloat() }) }
@@ -198,7 +223,8 @@ private fun loadEditorSource(context: Context, uri: Uri): File {
             Row(Modifier.horizontalScroll(rememberScrollState())) {
                 TextButton(onClick = { edit { it.undo() } }, enabled = model.canUndo && !busy) { Text("Undo") }
                 TextButton(onClick = { edit { it.redo() } }, enabled = model.canRedo && !busy) { Text("Redo") }
-                TextButton(onClick = { exportOnlyPage = true; exporter.launch("DocMate-page-${selected + 1}.pdf") }, enabled = !busy) { Text("Extract page") }
+                TextButton(onClick = { exportRange = ""; exportOnlyPage = true; exporter.launch("DocMate-page-${selected + 1}.pdf") }, enabled = !busy) { Text("Extract page") }
+                TextButton(onClick = { exportRange = ""; rangeError = null; rangeDialog = true }, enabled = !busy) { Text("Export range") }
                 TextButton(onClick = { edit { it.insertBlank(selected) } }, enabled = !busy && model.pages.size < 100) { Text("Blank page") }
                 TextButton(onClick = { edit { it.rotate(selected) } }, enabled = !busy) { Text("Rotate") }
                 TextButton(onClick = { edit { it.duplicate(selected) } }, enabled = !busy && model.pages.size < 100) { Text("Duplicate") }

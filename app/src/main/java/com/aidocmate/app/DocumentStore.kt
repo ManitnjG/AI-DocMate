@@ -70,7 +70,7 @@ class DocumentStore(private val context: Context) {
         }
     }
 
-    suspend fun import(uri: Uri): SavedDoc = withContext(Dispatchers.IO) {
+    suspend fun import(uri: Uri, ocrLanguage: String = "eng"): SavedDoc = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
         val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: "Document"
         val extension = name.substringAfterLast('.', "").lowercase()
@@ -81,7 +81,21 @@ class DocumentStore(private val context: Context) {
                 while (true) { val n = input.read(buffer); if (n < 0) break; total += n
                     require(total <= 25 * 1024 * 1024) { "Choose a file smaller than 25 MB" }; out.write(buffer, 0, n) }
             } } ?: error("Cannot open this file")
+            require(ocrLanguage in com.aidocmate.app.scan.OcrLanguages.names) { "Unsupported OCR language" }
             val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+            var tess: com.googlecode.tesseract.android.TessBaseAPI? = null
+            suspend fun recognize(bitmap: android.graphics.Bitmap): String {
+                if (ocrLanguage == "eng") return recognizer.process(InputImage.fromBitmap(bitmap, 0)).await().text
+                val engine = tess ?: com.googlecode.tesseract.android.TessBaseAPI().also { api ->
+                    tess = api
+                    val models = com.aidocmate.app.scan.OcrModels(context)
+                    check(models.ready(ocrLanguage)) { "Download the selected OCR language pack first" }
+                    check(api.init(models.root.path, com.aidocmate.app.scan.OcrLanguages.codes(ocrLanguage).joinToString("+"), com.googlecode.tesseract.android.TessBaseAPI.OEM_LSTM_ONLY)) { "Cannot start OCR" }
+                    api.setPageSegMode(com.googlecode.tesseract.android.TessBaseAPI.PageSegMode.PSM_AUTO)
+                }
+                engine.setImage(bitmap)
+                return engine.getUTF8Text() ?: ""
+            }
             val pages = try {
                 when {
                     extension == "txt" -> listOf(DocPage(1, tmp.readText()))
@@ -97,7 +111,7 @@ class DocumentStore(private val context: Context) {
                                     if (p.text.isNotBlank()) p else renderer.openPage(p.number - 1).use { page ->
                                         val scale = minOf(2f, 1800f / maxOf(page.width, page.height))
                                         val bitmap = android.graphics.Bitmap.createBitmap((page.width * scale).toInt().coerceAtLeast(1), (page.height * scale).toInt().coerceAtLeast(1), android.graphics.Bitmap.Config.ARGB_8888)
-                                        try { bitmap.eraseColor(android.graphics.Color.WHITE); page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY); DocPage(p.number, recognizer.process(InputImage.fromBitmap(bitmap, 0)).await().text) } finally { bitmap.recycle() }
+                                        try { bitmap.eraseColor(android.graphics.Color.WHITE); page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY); DocPage(p.number, recognize(bitmap)) } finally { bitmap.recycle() }
                                     }
                                 } }
                             }
@@ -109,11 +123,11 @@ class DocumentStore(private val context: Context) {
                         var sample = 1
                         while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 2400) sample *= 2
                         val bitmap = android.graphics.BitmapFactory.decodeFile(tmp.path, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }) ?: error("Unsupported file. Choose PDF, DOCX, PPTX, TXT, JPG or PNG.")
-                        try { listOf(DocPage(1, recognizer.process(InputImage.fromBitmap(bitmap, 0)).await().text)) } finally { bitmap.recycle() }
+                        try { listOf(DocPage(1, recognize(bitmap))) } finally { bitmap.recycle() }
                     }
                 }
-            } finally { recognizer.close() }
-            require(pages.any { it.text.isNotBlank() }) { "No text detected. Built-in scan OCR currently supports Latin text." }
+            } finally { recognizer.close(); tess?.recycle() }
+            require(pages.any { it.text.isNotBlank() }) { "No text detected. Try a clearer scan or select the correct OCR language." }
             require(pages.sumOf { it.text.length } <= 1_000_000) { "Document text is too large" }
             SavedDoc(UUID.randomUUID().toString(), name, pages).also { save(it) }
         } finally { tmp.delete() }
