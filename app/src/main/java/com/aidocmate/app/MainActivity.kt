@@ -50,7 +50,6 @@ fun DocMateApp(context: Context) {
     var deleteTarget by remember { mutableStateOf<SavedDoc?>(null) }
     var search by remember { mutableStateOf("") }
     var exportCsv by remember { mutableStateOf(false) }
-    var exportMode by remember { mutableStateOf("txt") }
 
     LaunchedEffect(Unit) { history = withContext(Dispatchers.IO) { store.list() } }
     suspend fun saveResult(result: String) {
@@ -72,10 +71,9 @@ fun DocMateApp(context: Context) {
             }
         }
     }
-    val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
+    val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         if (uri != null) {
-            val snapshot = if (exportCsv) StructuredExtractor.csv(doc?.pages?.joinToString("
-") { it.text } ?: "") else ResultFormatter.clean(output)
+            val snapshot = if (exportCsv) StructuredExtractor.csv(doc?.pages?.joinToString("\n") { it.text } ?: "") else ResultFormatter.clean(output)
             scope.launch {
                 try { withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(snapshot) } ?: error("Cannot write file") } }
                 catch (e: Exception) { output = "Export failed: ${e.message}" }
@@ -109,15 +107,14 @@ fun DocMateApp(context: Context) {
     Scaffold(topBar = { TopAppBar(title = { Text("AI DocMate") }, actions = { TextButton(onClick = { settings = true }, enabled = !busy) { Text("About") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Your documents, explained", style = MaterialTheme.typography.headlineSmall)
-            Text("PDF, DOCX, TXT and image import • private local history • answers with sources")
+            Text("PDF and image import • private local history • answers with sources")
             if (!AiClient.configured) Text("Cloud AI is awaiting activation. Use the offline tools below.", style = MaterialTheme.typography.bodySmall)
-            Button(onClick = { picker.launch(arrayOf("application/pdf", "image/jpeg", "image/png", "text/plain", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Import PDF or photo") }
-            Text("Up to 25 MB / 100 PDF pages. PDF, DOCX and TXT text import supported. Scan recognition currently supports Latin text.", style = MaterialTheme.typography.bodySmall)
+            Button(onClick = { picker.launch(arrayOf("application/pdf", "image/jpeg", "image/png")) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Import PDF or photo") }
+            Text("Up to 25 MB / 100 PDF pages. Scan recognition: Latin text. Selectable Tamil PDF text can be used with cloud AI.", style = MaterialTheme.typography.bodySmall)
             if (busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Processing… Please keep the app open.") }
             doc?.let { current ->
                 Text(current.name, style = MaterialTheme.typography.titleLarge)
-                val fullText = current.pages.joinToString("
-") { it.text }
+                val fullText = current.pages.joinToString("\n") { it.text }
                 Text(ResultFormatter.classify(fullText), style = MaterialTheme.typography.labelLarge)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ResultFormatter.suggestedQuestions(fullText).take(3).forEach { suggestion -> AssistChip(onClick = { question = suggestion }, label = { Text(suggestion, maxLines = 1) }, enabled = !busy) }
@@ -135,20 +132,10 @@ fun DocMateApp(context: Context) {
                 OutlinedButton(onClick = { scope.launch { try { saveResult(withContext(Dispatchers.Default) { LocalAssistant.answer(current.pages, "", true) }) } catch(e: Exception) { output = "Could not summarize: ${e.message}" } } }, enabled = !busy) { Text("Offline overview") }
                 OutlinedButton(onClick = { scope.launch { try {
                     val invoice = StructuredExtractor.invoice(fullText).display()
-                    val generic = current.pages.joinToString("
-
-") { "Page ${it.number}
-${DocTools.extract(it.text)}" }
-                    saveResult(if (invoice.isNotBlank()) "Structured invoice / GST details
-
-$invoice
-
-$generic" else generic)
+                    val generic = current.pages.joinToString("\n\n") { "Page ${it.number}\n${DocTools.extract(it.text)}" }
+                    saveResult(if (invoice.isNotBlank()) "Structured invoice / GST details\n\n$invoice\n\n$generic" else generic)
                 } catch(e: Exception) { output = "Save failed: ${e.message}" } } }, enabled = !busy) { Text("Extract document fields offline") }
-                OutlinedButton(onClick = { output = current.pages.joinToString("
-
-") { "Page ${it.number}
-${it.text}" } }, enabled = !busy) { Text("View source text") }
+                OutlinedButton(onClick = { output = current.pages.joinToString("\n\n") { "Page ${it.number}\n${it.text}" } }, enabled = !busy) { Text("View source text") }
             }
             HorizontalDivider()
             Text("Result", style = MaterialTheme.typography.titleMedium)
