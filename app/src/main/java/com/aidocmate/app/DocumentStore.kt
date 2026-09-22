@@ -18,15 +18,15 @@ import java.io.File
 import java.util.UUID
 
 data class DocPage(val number: Int, val text: String)
-data class SavedDoc(val id: String, val name: String, val pages: List<DocPage>, val result: String = "")
+data class SavedDoc(val id: String, val name: String, val pages: List<DocPage>, val result: String = "", val favorite: Boolean = false, val tags: List<String> = emptyList())
 class DocumentStore(private val context: Context) {
     private val dir = File(context.filesDir, "documents").apply { mkdirs() }
     fun list(): List<SavedDoc> = dir.listFiles()?.filter { it.extension == "json" }?.sortedByDescending { it.lastModified() }?.mapNotNull { runCatching {
         val o = JSONObject(it.readText()); val a = o.getJSONArray("pages")
-        SavedDoc(o.getString("id"), o.getString("name"), (0 until a.length()).map { i -> a.getJSONObject(i).let { p -> DocPage(p.getInt("number"), p.getString("text")) } }, o.optString("result"))
+        SavedDoc(o.getString("id"), o.getString("name"), (0 until a.length()).map { i -> a.getJSONObject(i).let { p -> DocPage(p.getInt("number"), p.getString("text")) } }, o.optString("result"), o.optBoolean("favorite", false), o.optJSONArray("tags")?.let { tags -> (0 until tags.length()).map { i -> tags.getString(i) } } ?: emptyList())
     }.getOrNull() } ?: emptyList()
     fun save(d: SavedDoc) {
-        val o = JSONObject().put("id", d.id).put("name", d.name).put("result", d.result).put("pages", pagesJson(d.pages))
+        val o = JSONObject().put("id", d.id).put("name", d.name).put("result", d.result).put("favorite", d.favorite).put("tags", JSONArray(d.tags)).put("pages", pagesJson(d.pages))
         val temp = File(dir, d.id + ".tmp"); temp.writeText(o.toString())
         check(temp.renameTo(File(dir, d.id + ".json"))) { "Could not save document" }
     }
