@@ -1,6 +1,6 @@
 # AI DocMate — Android document assistant
 
-Version 0.3.0 is a pilot with real local document processing and an optional authenticated AI API.
+Version 0.4.0 is a pilot with real local document processing and an optional authenticated AI API.
 
 ## Implemented
 - Import selectable-text PDFs and JPG/PNG images (25 MB; 100 PDF pages).
@@ -8,13 +8,14 @@ Version 0.3.0 is a pilot with real local document processing and an optional aut
 - Private device document history, name search, rename and delete; latest result saved per document.
 - Page-labelled source text; offline date, amount and phone extraction.
 - Cloud questions and summaries with source excerpts, English/Tamil answer selection, and confirmation before sending extracted text.
-- HTTPS-only backend connection; user access token encrypted with Android Keystore; provider key stays on the server.
+- HTTPS-only service connection; automatically issued session encrypted with Android Keystore; provider key stays on the server.
+- Customer-facing About/privacy screen replaces developer connection settings.
 - Copy, Android text sharing, and TXT export.
 - Validated API requests, per-token pilot rate limits, provider retry and explicit extractive fallback.
 - CI backend tests, Android debug build and Android lint.
 
 ## Setup
-See [backend setup](backend/README.md). Deploy and configure the backend, then enter its HTTPS URL and your access token in Android Settings once. No backend URL or provider secret is bundled. Import, extraction, history and export work without a backend.
+The owner activates the service once using [backend setup](backend/README.md). Customer builds get the public HTTPS service address from the GitHub Actions variable `DOCMATE_API_URL` and obtain temporary sessions automatically. Customers never enter a URL, access token or API key. Until owner activation, cloud buttons are disabled and clearly labelled; offline source search, extractive overview, import, extraction, history and export remain available.
 
 ## Build
 Java 17, Android SDK 35 and Gradle 8.9: `gradle assembleDebug lintDebug`. GitHub Actions uploads `AI-DocMate-debug-apk` after successful checks. The repository does not yet include a Gradle wrapper.

@@ -8,7 +8,8 @@ import time
 from collections import defaultdict, deque
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+import sessions
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="AI DocMate", version="0.3.0")
@@ -25,12 +26,19 @@ class Ask(BaseModel):
     language: str = Field(default="English", pattern="^(English|Tamil)$")
     mode: str = Field(default="question", pattern="^(question|summary)$")
 
-async def authorize(authorization: str = Header(default="")):
+async def authorize(request: Request, authorization: str = Header(default="")):
+    token = authorization.removeprefix("Bearer ")
+    subject = sessions.verify(token)
+    if subject:
+        sessions.enforce(request, subject)
+        return
     tokens = [t.strip() for t in os.getenv("DOCMATE_ACCESS_TOKENS", "").split(",") if t.strip()]
     if not tokens:
+        if sessions.enabled():
+            raise HTTPException(401, "Session expired. Please reconnect.")
         raise HTTPException(503, "Server access tokens are not configured")
     token = authorization.removeprefix("Bearer ")
-    if not any(secrets.compare_digest(token, t) for t in tokens):
+    if not any(secrets.compare_digest(token.encode(), t.encode()) for t in tokens):
         raise HTTPException(401, "Invalid access token")
     now = time.monotonic()
     # Evict stale identities so rotated tokens do not grow memory indefinitely.
@@ -96,10 +104,15 @@ async def complete(context, question, language):
                 continue
     return None
 
+@app.post("/session")
+def create_session(request: Request):
+    return sessions.issue(request)
+
 @app.get("/health")
 def health():
     return {"ok": True, "ai_configured": bool(os.getenv("OPENROUTER_API_KEY")),
-            "access_configured": bool(os.getenv("DOCMATE_ACCESS_TOKENS"))}
+            "access_configured": bool(os.getenv("DOCMATE_ACCESS_TOKENS")),
+            "public_sessions": sessions.enabled() and len(os.getenv("DOCMATE_SESSION_SECRET", "")) >= 32}
 
 @app.post("/ask", dependencies=[Depends(authorize)])
 async def ask(x: Ask):

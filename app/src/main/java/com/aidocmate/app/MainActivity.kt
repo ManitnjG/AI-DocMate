@@ -16,7 +16,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import kotlinx.coroutines.Dispatchers
@@ -42,8 +41,6 @@ fun DocMateApp(context: Context) {
     var output by remember { mutableStateOf("Import a PDF or image to begin.") }
     var busy by remember { mutableStateOf(false) }
     var question by remember { mutableStateOf("") }
-    var endpoint by remember { mutableStateOf(prefs.getString("endpoint", "") ?: "") }
-    var token by remember { mutableStateOf(SecretStore.read(context)) }
     var language by remember { mutableStateOf(prefs.getString("language", "English") ?: "English") }
     var settings by remember { mutableStateOf(false) }
     var cloudConsent by remember { mutableStateOf(false) }
@@ -78,24 +75,20 @@ fun DocMateApp(context: Context) {
             catch (e: Exception) { output = "Export failed: ${e.message}" }
         } }
     }
-    if (settings) AlertDialog(onDismissRequest = { settings = false }, title = { Text("AI connection") }, text = {
+    if (settings) AlertDialog(onDismissRequest = { settings = false }, title = { Text("About & privacy") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Use your deployed DocMate HTTPS server and personal access token. Provider API keys belong only on the server.")
-            OutlinedTextField(endpoint, { endpoint = it }, label = { Text("Backend URL") }, singleLine = true)
-            OutlinedTextField(token, { token = it }, label = { Text("Access token") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
-            Text("Documents and results are stored privately on this device. Delete documents from history to remove them. Cloud requests send extracted text only after confirmation.")
+            Text(if (AiClient.configured) "AI is provided through DocMate. You do not need your own API key or server." else "Cloud AI is not activated in this build. Offline overview, source search, OCR and extraction are available.")
+            Text("Cloud answers require internet and are subject to daily usage limits. Before each cloud request, you can choose whether to send the document text.")
+            Text("Your saved documents stay on this device. Delete them from history to remove them. Offline tools do not upload your document.")
         }
-    }, confirmButton = { TextButton(onClick = {
-        runCatching { SecretStore.write(context, token); prefs.edit().putString("endpoint", endpoint).apply() }.onFailure { output = "Could not save settings: ${it.message}" }
-        settings = false
-    }) { Text("Save") } }, dismissButton = { TextButton(onClick = { settings = false }) { Text("Close") } })
+    }, confirmButton = { TextButton(onClick = { settings = false }) { Text("Close") } })
     if (cloudConsent) AlertDialog(onDismissRequest = { cloudConsent = false }, title = { Text("Send document text to AI?") }, text = {
-        Text("Extracted text will be sent to $endpoint and its AI provider. Only continue if you are comfortable sharing this document. Source excerpts remain available offline.")
+        Text("Extracted text will be sent to the DocMate service and its AI provider, OpenRouter. Only continue if you are comfortable sharing this document. Source excerpts remain available offline.")
     }, confirmButton = { TextButton(onClick = {
         cloudConsent = false
         val current = doc
         if (current != null) { busy = true; scope.launch {
-            try { saveResult(AiClient.ask(endpoint, token, current.pages, if (pendingSummary) "Summarize the key points, dates, amounts and action items." else question, language, pendingSummary)) }
+            try { saveResult(AiClient.ask(context, current.pages, if (pendingSummary) "Summarize the key points, dates, amounts and action items." else question, language, pendingSummary)) }
             catch (e: Exception) { output = "Could not complete request: ${e.message}. Your document is saved; you can retry." }
             finally { busy = false }
         } }
@@ -106,10 +99,11 @@ fun DocMateApp(context: Context) {
     deleteTarget?.let { target -> AlertDialog(onDismissRequest = { deleteTarget = null }, title = { Text("Delete ${target.name}?") }, text = { Text("Removes saved text and results from this device.") }, confirmButton = {
         TextButton(onClick = { deleteTarget = null; scope.launch { try { withContext(Dispatchers.IO) { store.delete(target) }; history = withContext(Dispatchers.IO) { store.list() }; if (doc?.id == target.id) { doc = null; output = "Document deleted." } } catch(e: Exception) { output = "Delete failed: ${e.message}" } } }) { Text("Delete") }
     }, dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Cancel") } }) }
-    Scaffold(topBar = { TopAppBar(title = { Text("AI DocMate") }, actions = { TextButton(onClick = { settings = true }, enabled = !busy) { Text("Settings") } }) }) { padding ->
+    Scaffold(topBar = { TopAppBar(title = { Text("AI DocMate") }, actions = { TextButton(onClick = { settings = true }, enabled = !busy) { Text("About") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Your documents, explained", style = MaterialTheme.typography.headlineSmall)
             Text("PDF and image import • private local history • answers with sources")
+            if (!AiClient.configured) Text("Cloud AI is awaiting activation. Use the offline tools below.", style = MaterialTheme.typography.bodySmall)
             Button(onClick = { picker.launch(arrayOf("application/pdf", "image/jpeg", "image/png")) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Import PDF or photo") }
             Text("Up to 25 MB / 100 PDF pages. Scan recognition: Latin text. Selectable Tamil PDF text can be used with cloud AI.", style = MaterialTheme.typography.bodySmall)
             if (busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Processing… Please keep the app open.") }
@@ -121,8 +115,10 @@ fun DocMateApp(context: Context) {
                     listOf("English", "Tamil").forEach { lang -> FilterChip(selected = language == lang, onClick = { language = lang; prefs.edit().putString("language", lang).apply() }, label = { Text(lang) }, enabled = !busy) }
                 }
                 OutlinedTextField(question, { question = it.take(2000) }, modifier = Modifier.fillMaxWidth(), label = { Text("Ask about this document") }, enabled = !busy)
-                Button(onClick = { pendingSummary = false; cloudConsent = true }, enabled = !busy && question.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Ask AI") }
-                OutlinedButton(onClick = { pendingSummary = true; cloudConsent = true }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("AI summary") }
+                Button(onClick = { pendingSummary = false; cloudConsent = true }, enabled = !busy && question.isNotBlank() && AiClient.configured, modifier = Modifier.fillMaxWidth()) { Text("Ask AI") }
+                OutlinedButton(onClick = { pendingSummary = true; cloudConsent = true }, enabled = !busy && AiClient.configured, modifier = Modifier.fillMaxWidth()) { Text("AI summary") }
+                OutlinedButton(onClick = { scope.launch { try { saveResult(withContext(Dispatchers.Default) { LocalAssistant.answer(current.pages, question, false) }) } catch(e: Exception) { output = "Could not search: ${e.message}" } } }, enabled = !busy && question.isNotBlank()) { Text("Search source offline") }
+                OutlinedButton(onClick = { scope.launch { try { saveResult(withContext(Dispatchers.Default) { LocalAssistant.answer(current.pages, "", true) }) } catch(e: Exception) { output = "Could not summarize: ${e.message}" } } }, enabled = !busy) { Text("Offline overview") }
                 OutlinedButton(onClick = { scope.launch { try { saveResult(current.pages.joinToString("\n\n") { "Page ${it.number}\n${DocTools.extract(it.text)}" }) } catch(e: Exception) { output = "Save failed: ${e.message}" } } }, enabled = !busy) { Text("Extract dates, amounts & phones offline") }
                 OutlinedButton(onClick = { output = current.pages.joinToString("\n\n") { "Page ${it.number}\n${it.text}" } }, enabled = !busy) { Text("View source text") }
             }
