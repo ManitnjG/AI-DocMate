@@ -49,6 +49,6 @@ object EditorOcr {
             if(brightness<min) { min=brightness; darkest=c }
         }
         return EditorMark(kind="replace",left=left.toFloat()/w,top=top.toFloat()/h,right=right.toFloat()/w,bottom=bottom.toFloat()/h,
-            text=text.take(4000),size=((bottom-top).toFloat()/h*.88f).coerceIn(.001f,.2f),color=darkest,background=background)
+            text=text.take(4000),size=((bottom-top).toFloat()/h*.88f).coerceIn(.001f,.2f),color=darkest,background=background,eraseBox=listOf(left.toFloat()/w,top.toFloat()/h,right.toFloat()/w,bottom.toFloat()/h))
     }
 }

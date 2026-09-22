@@ -134,7 +134,7 @@ class MainActivity : ComponentActivity() {
             val prompt=if(pendingSummary) "Summarize the key points, dates, amounts and action items." else question
             scope.launch { try {
                 withContext(Dispatchers.IO) { AssistantJobs.enqueue(context,current,prompt,language,pendingSummary) }
-                output="AI request queued. You can leave this screen; the answer will be saved in conversation history."
+                output=withContext(Dispatchers.IO) { store.get(current.id)?.result ?: "AI request queued. The answer will be saved in conversation history." }
             } catch(e:Exception) { output="Could not queue request: ${e.message}" } }
         }
     }){Text("Continue")}},dismissButton={TextButton(onClick={cloudConsent=false}){Text("Cancel")}})

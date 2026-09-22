@@ -10,9 +10,10 @@ data class EditorMark(
     val left: Float = .1f, val top: Float = .1f, val right: Float = .8f, val bottom: Float = .2f,
     val text: String = "", val size: Float = .025f, val color: Int = 0xFF000000.toInt(),
     val background: Int = 0xFFFFFFFF.toInt(), val family: String = "sans-serif",
-    val bold: Boolean = false, val italic: Boolean = false, val points: List<EditorPoint> = emptyList(), val fontKey: String = ""
+    val bold: Boolean = false, val italic: Boolean = false, val points: List<EditorPoint> = emptyList(), val fontKey: String = "", val eraseBox: List<Float> = emptyList()
 ) {
     fun validate() {
+        require(eraseBox.isEmpty() || (eraseBox.size==4 && eraseBox.all{it.isFinite() && it in 0f..1f} && eraseBox[2]>=eraseBox[0] && eraseBox[3]>=eraseBox[1]))
         require(fontKey.isEmpty() || Regex("[a-f0-9]{64}").matches(fontKey))
         require(kind in listOf("text", "replace", "ink", "highlight", "rectangle"))
         require(listOf(left, top, right, bottom, size).all { it.isFinite() })
@@ -28,13 +29,13 @@ object EditorPageCodec {
     fun encode(pages: List<EditorPage>): String {
         val buffer = ByteArrayOutputStream()
         DataOutputStream(buffer).use { out ->
-            out.writeInt(3); out.writeInt(pages.size)
+            out.writeInt(4); out.writeInt(pages.size)
             pages.forEach { page ->
                 out.writeInt(page.source); out.writeInt(page.rotation); out.writeInt(page.marks.size)
                 page.marks.forEach { m ->
                     m.validate(); out.writeUTF(m.id); out.writeUTF(m.kind)
                     listOf(m.left,m.top,m.right,m.bottom,m.size).forEach(out::writeFloat)
-                    out.writeUTF(m.text); out.writeInt(m.color); out.writeInt(m.background); out.writeUTF(m.family); out.writeUTF(m.fontKey)
+                    out.writeUTF(m.text); out.writeInt(m.color); out.writeInt(m.background); out.writeUTF(m.family); out.writeUTF(m.fontKey);out.writeInt(m.eraseBox.size);m.eraseBox.forEach(out::writeFloat)
                     out.writeBoolean(m.bold); out.writeBoolean(m.italic); out.writeInt(m.points.size)
                     m.points.forEach { out.writeFloat(it.x); out.writeFloat(it.y) }
                 }
@@ -49,7 +50,7 @@ object EditorPageCodec {
             val p = it.split(','); require(p.size == 2); EditorPage(p[0].toInt(), p[1].toInt())
         }.also(::validate)
         return DataInputStream(ByteArrayInputStream(Base64.getDecoder().decode(value.drop(3)))).use { input ->
-            val version=input.readInt();require(version in 2..3)
+            val version=input.readInt();require(version in 2..4)
             val count = input.readInt(); require(count in 1..100)
             val pages = List(count) {
                 val source = input.readInt(); val rotation = input.readInt(); val marks = input.readInt(); require(marks in 0..100)
@@ -57,8 +58,9 @@ object EditorPageCodec {
                     val id = input.readUTF(); val kind = input.readUTF()
                     val left = input.readFloat(); val top = input.readFloat(); val right = input.readFloat(); val bottom = input.readFloat(); val size = input.readFloat()
                     val text = input.readUTF(); val color = input.readInt(); val background = input.readInt(); val family = input.readUTF();val fontKey=if(version>=3) input.readUTF() else ""
+                    val eraseCount=if(version>=4) input.readInt() else 0;require(eraseCount==0 || eraseCount==4);val eraseBox=List(eraseCount){input.readFloat()}
                     val bold = input.readBoolean(); val italic = input.readBoolean(); val points = input.readInt(); require(points in 0..3000)
-                    EditorMark(id,kind,left,top,right,bottom,text,size,color,background,family,bold,italic,List(points) { EditorPoint(input.readFloat(),input.readFloat()) },fontKey).also { it.validate() }
+                    EditorMark(id,kind,left,top,right,bottom,text,size,color,background,family,bold,italic,List(points) { EditorPoint(input.readFloat(),input.readFloat()) },fontKey,eraseBox).also { it.validate() }
                 })
             }
             require(input.available() == 0); validate(pages); pages

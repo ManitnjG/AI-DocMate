@@ -6,7 +6,7 @@ import org.junit.Test
 class EditorModelTest {
     @Test fun unicodeAnnotationsSurviveHistoryAndPageOperations() {
         val model=PageEdits(2)
-        val mark=EditorMark(kind="replace",text="தமிழ் हिन्दी اردو",bold=true,italic=true,background=0xFFCCCCCC.toInt())
+        val mark=EditorMark(kind="replace",text="தமிழ் हिन्दी اردو",bold=true,italic=true,eraseBox=listOf(.1f,.1f,.8f,.2f),background=0xFFCCCCCC.toInt())
         model.putMark(0,mark);model.duplicate(0);model.move(1,2);model.rotate(2)
         val restored=PageEdits.restore(model.snapshot())
         assertEquals(model.pages,restored.pages)

@@ -36,7 +36,11 @@ object EditorRenderer {
                 "highlight" -> { paint.alpha = 80; canvas.drawRect(rect,paint) }
                 "rectangle" -> { paint.style = Paint.Style.STROKE; canvas.drawRect(rect,paint) }
                 else -> {
-                    if(mark.kind == "replace") canvas.drawRect(rect,Paint().apply { color = mark.background })
+                    if(mark.kind == "replace") {
+                        val b=mark.eraseBox
+                        val erase=if(b.size==4) RectF(b[0]*w,b[1]*h,b[2]*w,b[3]*h) else rect
+                        canvas.drawRect(erase,Paint().apply { color = mark.background })
+                    }
                     val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                         color = mark.color; textSize = mark.size*h
                         typeface = Typeface.create(mark.family,when { mark.bold && mark.italic -> Typeface.BOLD_ITALIC; mark.bold -> Typeface.BOLD; mark.italic -> Typeface.ITALIC; else -> Typeface.NORMAL })

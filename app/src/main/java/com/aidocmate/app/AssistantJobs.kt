@@ -38,6 +38,8 @@ class AssistantJobStore(context:Context):SQLiteOpenHelper(context.applicationCon
 }
 object AssistantJobs {
     fun enqueue(context:Context,doc:SavedDoc,question:String,language:String,summary:Boolean):String {
+        val offline=LocalAssistant.answer(doc.pages,question,summary)
+        DocumentStore(context).updateResult(doc.id,offline+"\n\nCloud answer queued; the offline result above is available now.")
         val id=AssistantJobStore(context).use { it.create(doc.id,question,language,summary) }
         schedule(context,id);return id
     }
