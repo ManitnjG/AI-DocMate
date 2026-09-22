@@ -11,6 +11,7 @@ android { namespace="com.aidocmate.app"; compileSdk=35
  }
 }
 dependencies {
+ implementation("androidx.work:work-runtime-ktx:2.10.0")
  implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
  implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
  implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")

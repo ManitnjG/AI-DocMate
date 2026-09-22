@@ -29,12 +29,18 @@ class DocumentStore(private val context: Context) {
         SavedDoc(o.getString("id"), o.getString("name"), (0 until a.length()).map { i -> a.getJSONObject(i).let { p -> DocPage(p.getInt("number"), p.getString("text")) } }, o.optString("result"), o.optBoolean("favorite", false), o.optJSONArray("tags")?.let { tags -> (0 until tags.length()).map { i -> tags.getString(i) } } ?: emptyList())
     }.getOrNull() } ?: emptyList()
 
-    fun save(d: SavedDoc) {
+    companion object { private val lock = Any() }
+    fun get(id: String): SavedDoc? = synchronized(lock) { list().firstOrNull { it.id == id } }
+    fun updateResult(id: String, result: String): Boolean = synchronized(lock) {
+        val current = get(id) ?: return@synchronized false
+        save(current.copy(result = result)); true
+    }
+    fun save(d: SavedDoc) = synchronized(lock) {
         val o = JSONObject().put("id", d.id).put("name", d.name).put("result", d.result).put("favorite", d.favorite).put("tags", JSONArray(d.tags)).put("pages", pagesJson(d.pages))
         val temp = File(dir, d.id + ".tmp"); temp.writeText(o.toString())
         check(temp.renameTo(File(dir, d.id + ".json"))) { "Could not save document" }
     }
-    fun delete(d: SavedDoc) { check(File(dir, d.id + ".json").delete()) { "Could not delete document" } }
+    fun delete(d: SavedDoc) = synchronized(lock) { check(File(dir, d.id + ".json").delete()) { "Could not delete document" } }
 
     private fun xmlText(xml: String): String = xml
         .replace(Regex("</(?:w:p|a:p)>", RegexOption.IGNORE_CASE), "\n")

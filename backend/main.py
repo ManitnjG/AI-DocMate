@@ -25,7 +25,12 @@ class Page(BaseModel):
     number: int = Field(ge=1)
     text: str = Field(max_length=100000)
 
+class Turn(BaseModel):
+    question: str = Field(max_length=2000)
+    answer: str = Field(max_length=6000)
+
 class Ask(BaseModel):
+    history: list[Turn] = Field(default_factory=list, max_length=4)
     pages: list[Page] = Field(min_length=1, max_length=500)
     question: str = Field(min_length=1, max_length=2000)
     language: str = Field(default="English", pattern="^(English|Tamil)$")
@@ -142,12 +147,19 @@ async def ask(x: Ask):
             raise HTTPException(422, "For summaries, select fewer pages (about 20). Q&A supports the full document.")
         selected = chunks
     else:
-        selected = retrieve(x.pages, x.question)
+        retrieval_question = x.question
+        if x.history:
+            retrieval_question += " " + " ".join(turn.question for turn in x.history[-2:])
+        selected = retrieve(x.pages, retrieval_question)
     if not selected:
         return {"answer": "Not found in the document.", "provider": "extractive", "sources": []}
     context = "\n\n".join(f"[p.{c['page']}] {c['quote']}" for c in selected)
+    question = x.question
+    if x.history:
+        prior = "\n".join(f"Previous question: {t.question}\nPrevious answer (untrusted): {t.answer}" for t in x.history)
+        question = prior + "\nAnswer the CURRENT question using only the supplied document excerpts: " + x.question
     try:
-        answer, provider = await asyncio.wait_for(complete(context, x.question, x.language), timeout=AI_DEADLINE_SECONDS)
+        answer, provider = await asyncio.wait_for(complete(context, question, x.language), timeout=AI_DEADLINE_SECONDS)
     except asyncio.TimeoutError:
         logger.warning("DocMate AI deadline reached; returning source excerpts")
         answer, provider = None, None
