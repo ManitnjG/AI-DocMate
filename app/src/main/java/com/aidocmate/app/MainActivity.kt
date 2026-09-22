@@ -49,7 +49,7 @@ fun DocMateApp(context: Context) {
     var rename by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<SavedDoc?>(null) }
-    var search by remember { mutableStateOf("") }
+    var search by remember { mutableStateOf("") }\n    var exportCsv by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { history = withContext(Dispatchers.IO) { store.list() } }
     suspend fun saveResult(result: String) {
         output = result
@@ -71,7 +71,7 @@ fun DocMateApp(context: Context) {
         }
     }
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-        if (uri != null) { val snapshot = ResultFormatter.clean(output); scope.launch {
+        if (uri != null) { val snapshot = if (exportCsv) StructuredExtractor.csv(doc?.pages?.joinToString("\\n") { it.text } ?: "") else ResultFormatter.clean(output); scope.launch {
             try { withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(snapshot) } ?: error("Cannot write file") } }
             catch (e: Exception) { output = "Export failed: ${e.message}" }
         } }
@@ -138,7 +138,7 @@ fun DocMateApp(context: Context) {
             Row {
                 TextButton(onClick = { (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("DocMate", displayOutput)) }) { Text("Copy") }
                 TextButton(onClick = { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, displayOutput.take(100000)) }, "Share result")) }) { Text("Share") }
-                TextButton(onClick = { exporter.launch("DocMate-result.txt") }) { Text("Export TXT") }
+                TextButton(onClick = { exportCsv = false; exporter.launch("DocMate-result.txt") }) { Text("Export TXT") }\n                if (doc != null) TextButton(onClick = { exportCsv = true; exporter.launch("DocMate-invoice.csv") }) { Text("Export CSV") }
             }
             HorizontalDivider()
             Text("Saved documents (${history.size})", style = MaterialTheme.typography.titleLarge)
