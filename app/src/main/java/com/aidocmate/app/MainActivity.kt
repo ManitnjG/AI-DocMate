@@ -17,6 +17,24 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+
+private fun cleanResultText(raw: String): String {
+    return raw
+        .replace(Regex("(?i)<br\\s*/?>"), "\\n")
+        .replace(Regex("\\[p\\.(\\d+)]", RegexOption.IGNORE_CASE), "Page $1")
+        .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")
+        .replace(Regex("(?m)^\\s*\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)+\\|?\\s*$"), "")
+        .lineSequence()
+        .map { line ->
+            val trimmed = line.trim()
+            if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+                trimmed.trim('|').split('|').joinToString("  •  ") { it.trim() }
+            } else line
+        }
+        .joinToString("\\n")
+        .replace(Regex("\\n{3,}"), "\\n\\n")
+        .trim()
+}
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -70,7 +88,7 @@ fun DocMateApp(context: Context) {
         }
     }
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-        if (uri != null) { val snapshot = output; scope.launch {
+        if (uri != null) { val snapshot = cleanResultText(output); scope.launch {
             try { withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(snapshot) } ?: error("Cannot write file") } }
             catch (e: Exception) { output = "Export failed: ${e.message}" }
         } }
@@ -124,10 +142,10 @@ fun DocMateApp(context: Context) {
             }
             HorizontalDivider()
             Text("Result", style = MaterialTheme.typography.titleMedium)
-            SelectionContainer { Text(output) }
+            val displayOutput = cleanResultText(output)\n            SelectionContainer { Text(displayOutput, modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyLarge) }
             Row {
-                TextButton(onClick = { (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("DocMate", output)) }) { Text("Copy") }
-                TextButton(onClick = { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, output.take(100000)) }, "Share result")) }) { Text("Share") }
+                TextButton(onClick = { (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("DocMate", displayOutput)) }) { Text("Copy") }
+                TextButton(onClick = { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, displayOutput.take(100000)) }, "Share result")) }) { Text("Share") }
                 TextButton(onClick = { exporter.launch("DocMate-result.txt") }) { Text("Export TXT") }
             }
             HorizontalDivider()
