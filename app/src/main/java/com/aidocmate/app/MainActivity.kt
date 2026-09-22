@@ -17,7 +17,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -49,7 +48,9 @@ fun DocMateApp(context: Context) {
     var rename by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<SavedDoc?>(null) }
-    var search by remember { mutableStateOf("") }\n    var exportCsv by remember { mutableStateOf(false) }
+    var search by remember { mutableStateOf("") }
+    var exportCsv by remember { mutableStateOf(false) }
+
     LaunchedEffect(Unit) { history = withContext(Dispatchers.IO) { store.list() } }
     suspend fun saveResult(result: String) {
         output = result
@@ -71,10 +72,13 @@ fun DocMateApp(context: Context) {
         }
     }
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-        if (uri != null) { val snapshot = if (exportCsv) StructuredExtractor.csv(doc?.pages?.joinToString("\\n") { it.text } ?: "") else ResultFormatter.clean(output); scope.launch {
-            try { withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(snapshot) } ?: error("Cannot write file") } }
-            catch (e: Exception) { output = "Export failed: ${e.message}" }
-        } }
+        if (uri != null) {
+            val snapshot = if (exportCsv) StructuredExtractor.csv(doc?.pages?.joinToString("\n") { it.text } ?: "") else ResultFormatter.clean(output)
+            scope.launch {
+                try { withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(snapshot) } ?: error("Cannot write file") } }
+                catch (e: Exception) { output = "Export failed: ${e.message}" }
+            }
+        }
     }
     if (settings) AlertDialog(onDismissRequest = { settings = false }, title = { Text("About & privacy") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -84,7 +88,7 @@ fun DocMateApp(context: Context) {
         }
     }, confirmButton = { TextButton(onClick = { settings = false }) { Text("Close") } })
     if (cloudConsent) AlertDialog(onDismissRequest = { cloudConsent = false }, title = { Text("Send document text to AI?") }, text = {
-        Text("Extracted text will be sent to the DocMate service and its AI provider, OpenRouter. Only continue if you are comfortable sharing this document. Source excerpts remain available offline.")
+        Text("Extracted text will be sent to the DocMate service and its configured AI provider. Only continue if you are comfortable sharing this document. Source excerpts remain available offline.")
     }, confirmButton = { TextButton(onClick = {
         cloudConsent = false
         val current = doc
@@ -113,22 +117,24 @@ fun DocMateApp(context: Context) {
                 val fullText = current.pages.joinToString("\n") { it.text }
                 Text(ResultFormatter.classify(fullText), style = MaterialTheme.typography.labelLarge)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ResultFormatter.suggestedQuestions(fullText).take(3).forEach { suggestion ->
-                        AssistChip(onClick = { question = suggestion }, label = { Text(suggestion, maxLines = 1) }, enabled = !busy)
-                    }
+                    ResultFormatter.suggestedQuestions(fullText).take(3).forEach { suggestion -> AssistChip(onClick = { question = suggestion }, label = { Text(suggestion, maxLines = 1) }, enabled = !busy) }
                 }
-                Row { TextButton(onClick = { newName = current.name; rename = true }, enabled = !busy) { Text("Rename") }
+                Row {
+                    TextButton(onClick = { newName = current.name; rename = true }, enabled = !busy) { Text("Rename") }
                     TextButton(onClick = { scope.launch { val updated = current.copy(favorite = !current.favorite); withContext(Dispatchers.IO) { store.save(updated) }; doc = updated; history = withContext(Dispatchers.IO) { store.list() } } }, enabled = !busy) { Text(if (current.favorite) "★ Favorite" else "☆ Favorite") }
-                    TextButton(onClick = { deleteTarget = current }, enabled = !busy) { Text("Delete") } }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("English", "Tamil").forEach { lang -> FilterChip(selected = language == lang, onClick = { language = lang; prefs.edit().putString("language", lang).apply() }, label = { Text(lang) }, enabled = !busy) }
+                    TextButton(onClick = { deleteTarget = current }, enabled = !busy) { Text("Delete") }
                 }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("English", "Tamil").forEach { lang -> FilterChip(selected = language == lang, onClick = { language = lang; prefs.edit().putString("language", lang).apply() }, label = { Text(lang) }, enabled = !busy) } }
                 OutlinedTextField(question, { question = it.take(2000) }, modifier = Modifier.fillMaxWidth(), label = { Text("Ask about this document") }, enabled = !busy)
                 Button(onClick = { pendingSummary = false; cloudConsent = true }, enabled = !busy && question.isNotBlank() && AiClient.configured, modifier = Modifier.fillMaxWidth()) { Text("Ask AI") }
                 OutlinedButton(onClick = { pendingSummary = true; cloudConsent = true }, enabled = !busy && AiClient.configured, modifier = Modifier.fillMaxWidth()) { Text("AI summary") }
                 OutlinedButton(onClick = { scope.launch { try { saveResult(withContext(Dispatchers.Default) { LocalAssistant.answer(current.pages, question, false) }) } catch(e: Exception) { output = "Could not search: ${e.message}" } } }, enabled = !busy && question.isNotBlank()) { Text("Search source offline") }
                 OutlinedButton(onClick = { scope.launch { try { saveResult(withContext(Dispatchers.Default) { LocalAssistant.answer(current.pages, "", true) }) } catch(e: Exception) { output = "Could not summarize: ${e.message}" } } }, enabled = !busy) { Text("Offline overview") }
-                OutlinedButton(onClick = { scope.launch { try { saveResult(current.pages.joinToString("\n\n") { "Page ${it.number}\n${DocTools.extract(it.text)}" }) } catch(e: Exception) { output = "Save failed: ${e.message}" } } }, enabled = !busy) { Text("Extract dates, amounts & phones offline") }
+                OutlinedButton(onClick = { scope.launch { try {
+                    val invoice = StructuredExtractor.invoice(fullText).display()
+                    val generic = current.pages.joinToString("\n\n") { "Page ${it.number}\n${DocTools.extract(it.text)}" }
+                    saveResult(if (invoice.isNotBlank()) "Structured invoice / GST details\n\n$invoice\n\n$generic" else generic)
+                } catch(e: Exception) { output = "Save failed: ${e.message}" } } }, enabled = !busy) { Text("Extract document fields offline") }
                 OutlinedButton(onClick = { output = current.pages.joinToString("\n\n") { "Page ${it.number}\n${it.text}" } }, enabled = !busy) { Text("View source text") }
             }
             HorizontalDivider()
@@ -138,11 +144,12 @@ fun DocMateApp(context: Context) {
             Row {
                 TextButton(onClick = { (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("DocMate", displayOutput)) }) { Text("Copy") }
                 TextButton(onClick = { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, displayOutput.take(100000)) }, "Share result")) }) { Text("Share") }
-                TextButton(onClick = { exportCsv = false; exporter.launch("DocMate-result.txt") }) { Text("Export TXT") }\n                if (doc != null) TextButton(onClick = { exportCsv = true; exporter.launch("DocMate-invoice.csv") }) { Text("Export CSV") }
+                TextButton(onClick = { exportCsv = false; exporter.launch("DocMate-result.txt") }) { Text("Export TXT") }
+                if (doc != null) TextButton(onClick = { exportCsv = true; exporter.launch("DocMate-invoice.csv") }) { Text("Export CSV") }
             }
             HorizontalDivider()
             Text("Saved documents (${history.size})", style = MaterialTheme.typography.titleLarge)
-            OutlinedTextField(search, { search = it }, label = { Text("Search document names") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(search, { search = it }, label = { Text("Search saved documents") }, modifier = Modifier.fillMaxWidth())
             history.filter { item -> search.isBlank() || item.name.contains(search, true) || item.tags.any { it.contains(search, true) } || item.pages.any { it.text.contains(search, true) } }.sortedByDescending { it.favorite }.forEach { item ->
                 OutlinedButton(onClick = { doc = item; output = item.result.ifBlank { "Loaded ${item.pages.size} pages." }; question = "" }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text((if (item.favorite) "★ " else "") + item.name) }
             }
