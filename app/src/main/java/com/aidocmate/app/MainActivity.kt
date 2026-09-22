@@ -18,36 +18,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-private fun cleanResultText(raw: String): String {
-    return raw
-        .replace(Regex("(?i)<br\\s*/?>"), "\\n")
-        .replace(Regex("\\[p\\.(\\d+)]", RegexOption.IGNORE_CASE), "Page $1")
-        .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")
-        .replace(Regex("(?m)^\\s*\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)+\\|?\\s*$"), "")
-        .lineSequence()
-        .map { line ->
-            val trimmed = line.trim()
-            if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
-                trimmed.trim('|').split('|').joinToString("  •  ") { it.trim() }
-            } else line
-        }
-        .joinToString("\\n")
-        .replace(Regex("\\n{3,}"), "\\n\\n")
-        .trim()
-}
-import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-
-class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        PDFBoxResourceLoader.init(applicationContext)
-        setContent { MaterialTheme { DocMateApp(this) } }
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DocMateApp(context: Context) {
@@ -88,7 +58,7 @@ fun DocMateApp(context: Context) {
         }
     }
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-        if (uri != null) { val snapshot = cleanResultText(output); scope.launch {
+        if (uri != null) { val snapshot = ResultFormatter.clean(output); scope.launch {
             try { withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(snapshot) } ?: error("Cannot write file") } }
             catch (e: Exception) { output = "Export failed: ${e.message}" }
         } }
@@ -127,7 +97,15 @@ fun DocMateApp(context: Context) {
             if (busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Processing… Please keep the app open.") }
             doc?.let { current ->
                 Text(current.name, style = MaterialTheme.typography.titleLarge)
+                val fullText = current.pages.joinToString("\n") { it.text }
+                Text(ResultFormatter.classify(fullText), style = MaterialTheme.typography.labelLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ResultFormatter.suggestedQuestions(fullText).take(3).forEach { suggestion ->
+                        AssistChip(onClick = { question = suggestion }, label = { Text(suggestion, maxLines = 1) }, enabled = !busy)
+                    }
+                }
                 Row { TextButton(onClick = { newName = current.name; rename = true }, enabled = !busy) { Text("Rename") }
+                    TextButton(onClick = { scope.launch { val updated = current.copy(favorite = !current.favorite); withContext(Dispatchers.IO) { store.save(updated) }; doc = updated; history = withContext(Dispatchers.IO) { store.list() } } }, enabled = !busy) { Text(if (current.favorite) "★ Favorite" else "☆ Favorite") }
                     TextButton(onClick = { deleteTarget = current }, enabled = !busy) { Text("Delete") } }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("English", "Tamil").forEach { lang -> FilterChip(selected = language == lang, onClick = { language = lang; prefs.edit().putString("language", lang).apply() }, label = { Text(lang) }, enabled = !busy) }
@@ -142,7 +120,7 @@ fun DocMateApp(context: Context) {
             }
             HorizontalDivider()
             Text("Result", style = MaterialTheme.typography.titleMedium)
-            val displayOutput = cleanResultText(output)\n            SelectionContainer { Text(displayOutput, modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyLarge) }
+            val displayOutput = ResultFormatter.clean(output)\n            SelectionContainer { Text(displayOutput, modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyLarge) }
             Row {
                 TextButton(onClick = { (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("DocMate", displayOutput)) }) { Text("Copy") }
                 TextButton(onClick = { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, displayOutput.take(100000)) }, "Share result")) }) { Text("Share") }
@@ -151,8 +129,8 @@ fun DocMateApp(context: Context) {
             HorizontalDivider()
             Text("Saved documents (${history.size})", style = MaterialTheme.typography.titleLarge)
             OutlinedTextField(search, { search = it }, label = { Text("Search document names") }, modifier = Modifier.fillMaxWidth())
-            history.filter { it.name.contains(search, true) }.forEach { item ->
-                OutlinedButton(onClick = { doc = item; output = item.result.ifBlank { "Loaded ${item.pages.size} pages." }; question = "" }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text(item.name) }
+            history.filter { item -> search.isBlank() || item.name.contains(search, true) || item.tags.any { it.contains(search, true) } || item.pages.any { it.text.contains(search, true) } }.sortedByDescending { it.favorite }.forEach { item ->
+                OutlinedButton(onClick = { doc = item; output = item.result.ifBlank { "Loaded ${item.pages.size} pages." }; question = "" }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text((if (item.favorite) "★ " else "") + item.name) }
             }
         }
     }
