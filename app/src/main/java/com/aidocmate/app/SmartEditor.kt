@@ -60,6 +60,8 @@ private fun loadEditorSource(context: Context, uri: Uri): File {
 }
 
 @Composable fun SmartEditor(context: Context, onBack: () -> Unit) {
+    var scannerOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    if (scannerOpen) { com.aidocmate.app.scan.ScannerScreen(context as androidx.activity.ComponentActivity) { scannerOpen = false }; return }
     val scope = rememberCoroutineScope()
     var source by remember { mutableStateOf<File?>(null) }
     var edits by remember { mutableStateOf<PageEdits?>(null) }
@@ -180,6 +182,7 @@ private fun loadEditorSource(context: Context, uri: Uri): File {
         Row { Button(onClick = { picker.launch(arrayOf("application/pdf", "image/jpeg", "image/png")) }, enabled = !busy && source == null) { Text("Open") }
             TextButton(onClick = { exportOnlyPage = false; exporter.launch("DocMate-edited.pdf") }, enabled = source != null && !busy) { Text("Export PDF") } }
         Row(Modifier.horizontalScroll(rememberScrollState())) {
+            TextButton(onClick = { scannerOpen = true }, enabled = !busy && source == null) { Text("Document scanner") }
             TextButton(onClick = { cameraPermission.launch(android.Manifest.permission.CAMERA) }, enabled = !busy && source == null) { Text("Capture photo") }
             TextButton(onClick = { merger.launch(arrayOf("application/pdf", "image/jpeg", "image/png")) }, enabled = !busy && source == null) { Text("Merge PDFs / photos") }
         }

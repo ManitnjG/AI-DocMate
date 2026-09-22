@@ -32,9 +32,34 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Prepare verified OCR models for device tests
+        run: |
+          python - <<'PYTHON'
+          import hashlib, json, pathlib, urllib.request
+          manifest = json.loads(pathlib.Path('app/src/main/assets/ocr-models.json').read_text())
+          target = pathlib.Path('app/src/androidTest/assets')
+          target.mkdir(parents=True, exist_ok=True)
+          for code in ('eng', 'tam'):
+              url = f"https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/{manifest['revision']}/{code}.traineddata"
+              data = urllib.request.urlopen(url, timeout=90).read()
+              assert hashlib.sha256(data).hexdigest() == manifest['models'][code]['sha256']
+              (target / f'{code}.traineddata').write_bytes(data)
+          PYTHON
       - run: gradle testDebugUnitTest assembleDebug lintDebug
         env:
           DOCMATE_API_URL: ${{ vars.DOCMATE_API_URL }}
+      - name: Enable KVM for scanner integration tests
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Test scanner drafts and English/Tamil searchable PDFs
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          arch: x86_64
+          disable-animations: true
+          script: gradle connectedDebugAndroidTest
       - uses: actions/upload-artifact@v4
         with:
           name: AI-DocMate-debug-apk
@@ -45,3 +70,11 @@ jobs:
         with:
           name: Android-lint-report
           path: app/build/reports/lint-results-debug.html
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Android-test-reports
+          path: |
+            app/build/reports/tests/
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
