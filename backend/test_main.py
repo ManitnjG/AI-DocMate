@@ -18,17 +18,21 @@ class ApiTests(unittest.TestCase):
         r = self.client.post('/ask', json=self.payload, headers=self.headers)
         self.assertEqual(r.json()['sources'], [])
     def test_fallback_and_pages(self):
-        with patch('main.complete', new=AsyncMock(return_value=None)):
+        with patch('main.complete', new=AsyncMock(return_value=(None, None))):
             r = self.client.post('/ask', json=self.payload, headers=self.headers)
         self.assertEqual(r.json()['provider'], 'extractive')
         self.assertEqual(r.json()['sources'][0]['page'], 1)
     def test_invalid_citation_rejected(self):
-        with patch('main.complete', new=AsyncMock(return_value='October [p.99]')):
+        with patch('main.complete', new=AsyncMock(return_value=('October [p.99]', 'test-provider'))):
             r = self.client.post('/ask', json=self.payload, headers=self.headers)
         self.assertEqual(r.json()['provider'], 'extractive')
+    def test_valid_provider_reported(self):
+        with patch('main.complete', new=AsyncMock(return_value=('Payment is due on 10 October [p.1]', 'test-provider'))):
+            r = self.client.post('/ask', json=self.payload, headers=self.headers)
+        self.assertEqual(r.json()['provider'], 'test-provider')
     def test_late_page_retrieved(self):
         self.payload['pages'] = [{'number': 1, 'text': 'Introduction. ' * 6000}, {'number': 80, 'text': 'Payment due tomorrow.'}]
-        with patch('main.complete', new=AsyncMock(return_value=None)):
+        with patch('main.complete', new=AsyncMock(return_value=(None, None))):
             r = self.client.post('/ask', json=self.payload, headers=self.headers)
         self.assertEqual(r.json()['sources'][0]['page'], 80)
     def test_long_summary_explicit_error(self):
