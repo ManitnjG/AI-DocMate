@@ -35,7 +35,7 @@ class MainActivity : ComponentActivity() {
 @Composable fun DocMateApp(context: Context) {
     var scannerOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     if (scannerOpen) { com.aidocmate.app.scan.ScannerScreen(context as ComponentActivity) { scannerOpen = false }; return }
-    var editorOpen by remember { mutableStateOf(false) }
+    var editorOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     if (editorOpen) { SmartEditor(context) { editorOpen = false }; return }
     val store=remember{DocumentStore(context)}; val prefs=remember{context.getSharedPreferences("settings",Context.MODE_PRIVATE)}; val scope=rememberCoroutineScope()
     var history by remember{mutableStateOf(emptyList<SavedDoc>())}; var doc by remember{mutableStateOf<SavedDoc?>(null)}; var output by remember{mutableStateOf("Import a document to begin.")}; var busy by remember{mutableStateOf(false)}; var question by remember{mutableStateOf("")}; var language by remember{mutableStateOf(prefs.getString("language","English")?:"English")}; var settings by remember{mutableStateOf(false)}; var cloudConsent by remember{mutableStateOf(false)}; var pendingSummary by remember{mutableStateOf(false)}; var rename by remember{mutableStateOf(false)}; var newName by remember{mutableStateOf("")}; var deleteTarget by remember{mutableStateOf<SavedDoc?>(null)}; var search by remember{mutableStateOf("")}; var exportCsv by remember{mutableStateOf(false)}; var selectedDocs by remember{mutableStateOf(setOf<String>())}
