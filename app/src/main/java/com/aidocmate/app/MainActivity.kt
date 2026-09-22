@@ -49,7 +49,8 @@ fun DocMateApp(context: Context) {
     var newName by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<SavedDoc?>(null) }
     var search by remember { mutableStateOf("") }
-    var exportCsv by remember { mutableStateOf(false) }\n    var exportMode by remember { mutableStateOf("txt") }
+    var exportCsv by remember { mutableStateOf(false) }
+    var exportMode by remember { mutableStateOf("txt") }
 
     LaunchedEffect(Unit) { history = withContext(Dispatchers.IO) { store.list() } }
     suspend fun saveResult(result: String) {
@@ -73,7 +74,8 @@ fun DocMateApp(context: Context) {
     }
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
         if (uri != null) {
-            val snapshot = if (exportCsv) StructuredExtractor.csv(doc?.pages?.joinToString("\n") { it.text } ?: "") else ResultFormatter.clean(output)
+            val snapshot = if (exportCsv) StructuredExtractor.csv(doc?.pages?.joinToString("
+") { it.text } ?: "") else ResultFormatter.clean(output)
             scope.launch {
                 try { withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(snapshot) } ?: error("Cannot write file") } }
                 catch (e: Exception) { output = "Export failed: ${e.message}" }
@@ -114,7 +116,8 @@ fun DocMateApp(context: Context) {
             if (busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Processing… Please keep the app open.") }
             doc?.let { current ->
                 Text(current.name, style = MaterialTheme.typography.titleLarge)
-                val fullText = current.pages.joinToString("\n") { it.text }
+                val fullText = current.pages.joinToString("
+") { it.text }
                 Text(ResultFormatter.classify(fullText), style = MaterialTheme.typography.labelLarge)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ResultFormatter.suggestedQuestions(fullText).take(3).forEach { suggestion -> AssistChip(onClick = { question = suggestion }, label = { Text(suggestion, maxLines = 1) }, enabled = !busy) }
@@ -132,10 +135,20 @@ fun DocMateApp(context: Context) {
                 OutlinedButton(onClick = { scope.launch { try { saveResult(withContext(Dispatchers.Default) { LocalAssistant.answer(current.pages, "", true) }) } catch(e: Exception) { output = "Could not summarize: ${e.message}" } } }, enabled = !busy) { Text("Offline overview") }
                 OutlinedButton(onClick = { scope.launch { try {
                     val invoice = StructuredExtractor.invoice(fullText).display()
-                    val generic = current.pages.joinToString("\n\n") { "Page ${it.number}\n${DocTools.extract(it.text)}" }
-                    saveResult(if (invoice.isNotBlank()) "Structured invoice / GST details\n\n$invoice\n\n$generic" else generic)
+                    val generic = current.pages.joinToString("
+
+") { "Page ${it.number}
+${DocTools.extract(it.text)}" }
+                    saveResult(if (invoice.isNotBlank()) "Structured invoice / GST details
+
+$invoice
+
+$generic" else generic)
                 } catch(e: Exception) { output = "Save failed: ${e.message}" } } }, enabled = !busy) { Text("Extract document fields offline") }
-                OutlinedButton(onClick = { output = current.pages.joinToString("\n\n") { "Page ${it.number}\n${it.text}" } }, enabled = !busy) { Text("View source text") }
+                OutlinedButton(onClick = { output = current.pages.joinToString("
+
+") { "Page ${it.number}
+${it.text}" } }, enabled = !busy) { Text("View source text") }
             }
             HorizontalDivider()
             Text("Result", style = MaterialTheme.typography.titleMedium)
