@@ -21,7 +21,7 @@ class SessionsTest(unittest.TestCase):
         return r.json()['access_token']
     def test_automatic_session_asks_without_owner_token(self):
         token = self.token()
-        with patch('main.complete', new=AsyncMock(return_value='Payment is due tomorrow [p.1]')):
+        with patch('main.complete', new=AsyncMock(return_value=('Payment is due tomorrow [p.1]', 'openrouter'))):
             r = self.client.post('/ask', headers={'Authorization': 'Bearer ' + token}, json={'pages': [{'number': 1, 'text': 'Payment due tomorrow.'}], 'question': 'payment'})
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()['provider'], 'openrouter')
@@ -45,7 +45,7 @@ class SessionsTest(unittest.TestCase):
         self.assertEqual(self.client.post('/session').status_code, 429)
     def test_global_budget_across_sessions(self):
         one, two = self.token(), self.token()
-        with patch.dict(os.environ, {'DOCMATE_DAILY_REQUESTS': '1'}), patch('main.complete', new=AsyncMock(return_value=None)):
+        with patch.dict(os.environ, {'DOCMATE_DAILY_REQUESTS': '1'}), patch('main.complete', new=AsyncMock(return_value=(None, None))):
             data = {'pages': [{'number': 1, 'text': 'Payment tomorrow'}], 'question': 'payment'}
             self.assertEqual(self.client.post('/ask', json=data, headers={'Authorization': 'Bearer ' + one}).status_code, 200)
             self.assertEqual(self.client.post('/ask', json=data, headers={'Authorization': 'Bearer ' + two}).status_code, 429)
