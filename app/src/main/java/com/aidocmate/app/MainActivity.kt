@@ -18,6 +18,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        PDFBoxResourceLoader.init(applicationContext)
+        setContent { MaterialTheme { DocMateApp(this) } }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DocMateApp(context: Context) {
@@ -120,7 +130,8 @@ fun DocMateApp(context: Context) {
             }
             HorizontalDivider()
             Text("Result", style = MaterialTheme.typography.titleMedium)
-            val displayOutput = ResultFormatter.clean(output)\n            SelectionContainer { Text(displayOutput, modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyLarge) }
+            val displayOutput = ResultFormatter.clean(output)
+            SelectionContainer { Text(displayOutput, modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyLarge) }
             Row {
                 TextButton(onClick = { (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("DocMate", displayOutput)) }) { Text("Copy") }
                 TextButton(onClick = { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, displayOutput.take(100000)) }, "Share result")) }) { Text("Share") }
