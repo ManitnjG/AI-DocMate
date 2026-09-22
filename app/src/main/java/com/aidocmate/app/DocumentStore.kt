@@ -45,17 +45,25 @@ class DocumentStore(private val context: Context) {
         .trim()
 
     private fun officePages(file: File, extension: String): List<DocPage> = ZipFile(file).use { zip ->
+        require(zip.size() <= 2000) { "Office archive has too many entries" }
+        var remaining = 8 * 1024 * 1024
+        fun readXml(entry: java.util.zip.ZipEntry): String {
+            val bytes = zip.getInputStream(entry).use { BoundedInput.read(it, minOf(remaining, 4 * 1024 * 1024)) }
+            remaining -= bytes.size
+            return bytes.toString(Charsets.UTF_8)
+        }
         when (extension) {
             "docx" -> {
                 val entry = zip.getEntry("word/document.xml") ?: error("Invalid DOCX document")
-                listOf(DocPage(1, xmlText(zip.getInputStream(entry).bufferedReader().use { it.readText() })))
+                listOf(DocPage(1, xmlText(readXml(entry))))
             }
             "pptx" -> {
                 val slideRegex = Regex("ppt/slides/slide(\\d+)\\.xml")
                 zip.entries().asSequence().mapNotNull { entry ->
                     val match = slideRegex.matchEntire(entry.name) ?: return@mapNotNull null
-                    val number = match.groupValues[1].toInt()
-                    number to xmlText(zip.getInputStream(entry).bufferedReader().use { it.readText() })
+                    val number = match.groupValues[1].toIntOrNull() ?: error("Invalid slide number")
+                    require(number in 1..200) { "Choose a presentation with at most 200 slides" }
+                    number to xmlText(readXml(entry))
                 }.sortedBy { it.first }.map { DocPage(it.first, it.second) }.toList().also { require(it.isNotEmpty()) { "Invalid PPTX presentation" } }
             }
             else -> error("Unsupported Office document")

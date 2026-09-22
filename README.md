@@ -1,6 +1,6 @@
 # AI DocMate — Android document assistant
 
-Version 0.5.0 is a pilot with real local document processing and an optional authenticated AI API.
+Version 0.6.0 is a pilot with real local document processing and an optional authenticated AI API.
 
 ## Implemented
 - Import selectable-text PDFs and JPG/PNG images (25 MB; 100 PDF pages).
@@ -12,7 +12,8 @@ Version 0.5.0 is a pilot with real local document processing and an optional aut
 - Customer-facing About/privacy screen replaces developer connection settings.
 - Copy, Android text sharing, and TXT export.
 - Validated API requests, per-token pilot rate limits, provider retry and explicit extractive fallback.
-- CI backend tests, Android unit tests, debug build and Android lint.
+- CI backend tests, Android unit tests, debug build and Android lint. Android artifacts are gated on backend success.
+- Office archives have actual decompressed-byte limits, entry limits and slide limits to reduce memory-exhaustion risk.
 - Separate offline Smart Editor workspace: PDF/photo preview, pinch zoom, pan, rotate, reorder, duplicate, delete, insert blank page, undo/redo, and export a separate PDF.
 - Export the current page to a separate PDF. Merge selected PDFs/photos into a new workspace (up to 20 inputs, 100 pages, 100 MB combined).
 - Camera capture through the system camera app, with private temporary files and permission handling; captured photos can be exported as PDF.

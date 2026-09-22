@@ -17,6 +17,7 @@ jobs:
       - run: pip install -r backend/requirements.txt
       - run: python -m unittest discover -s backend -v
   android:
+    needs: backend
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -70,7 +70,16 @@ private fun loadEditorSource(context: Context, uri: Uri): File {
     var preview by remember { mutableStateOf<Bitmap?>(null) }
     var zoom by remember { mutableFloatStateOf(1f) }
     var panX by remember { mutableFloatStateOf(0f) }; var panY by remember { mutableFloatStateOf(0f) }
-    BackHandler { if (!busy) onBack() }
+    var confirmClose by remember { mutableStateOf(false) }
+    fun requestClose() { if (source == null) onBack() else confirmClose = true }
+    BackHandler { if (!busy) requestClose() }
+    if (confirmClose) AlertDialog(
+        onDismissRequest = { confirmClose = false },
+        title = { Text("Close editor?") },
+        text = { Text("Export your PDF before closing. Unsaved changes will be discarded; original files stay unchanged.") },
+        confirmButton = { TextButton(onClick = onBack) { Text("Close editor") } },
+        dismissButton = { TextButton(onClick = { confirmClose = false }) { Text("Keep editing") } }
+    )
     DisposableEffect(Unit) { onDispose { source?.delete() } }
     var exportOnlyPage by remember { mutableStateOf(false) }
     var cameraFile by remember { mutableStateOf<File?>(null) }
@@ -167,14 +176,15 @@ private fun loadEditorSource(context: Context, uri: Uri): File {
     }
     fun edit(action: (PageEdits) -> Unit) { try { edits?.let(action); selected = selected.coerceAtMost((edits?.pages?.size ?: 1) - 1); revision++ } catch (e: Exception) { message = e.message ?: "Cannot edit page" } }
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row { TextButton(onClick = onBack, enabled = !busy) { Text("Back") }; Text("Smart Editor", style = MaterialTheme.typography.headlineSmall) }
-        Row { Button(onClick = { picker.launch(arrayOf("application/pdf", "image/jpeg", "image/png")) }, enabled = !busy) { Text("Open") }
+        Row { TextButton(onClick = { requestClose() }, enabled = !busy) { Text("Back") }; Text("Smart Editor", style = MaterialTheme.typography.headlineSmall) }
+        Row { Button(onClick = { picker.launch(arrayOf("application/pdf", "image/jpeg", "image/png")) }, enabled = !busy && source == null) { Text("Open") }
             TextButton(onClick = { exportOnlyPage = false; exporter.launch("DocMate-edited.pdf") }, enabled = source != null && !busy) { Text("Export PDF") } }
         Row(Modifier.horizontalScroll(rememberScrollState())) {
-            TextButton(onClick = { cameraPermission.launch(android.Manifest.permission.CAMERA) }, enabled = !busy) { Text("Capture photo") }
+            TextButton(onClick = { cameraPermission.launch(android.Manifest.permission.CAMERA) }, enabled = !busy && source == null) { Text("Capture photo") }
             TextButton(onClick = { merger.launch(arrayOf("application/pdf", "image/jpeg", "image/png")) }, enabled = !busy && source == null) { Text("Merge PDFs / photos") }
         }
         Text(message, style = MaterialTheme.typography.bodySmall)
+        if (source != null) Text("Export before closing or rotating your device.", style = MaterialTheme.typography.labelSmall)
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().pointerInput(source, selected) { detectTransformGestures { _, pan, scale, _ -> zoom = (zoom * scale).coerceIn(1f, 5f); panX = (panX + pan.x).coerceIn(-2000f, 2000f); panY = (panY + pan.y).coerceIn(-2000f, 2000f) } }) {
             preview?.let { bitmap -> Image(bitmap.asImageBitmap(), "Page ${selected + 1}", Modifier.fillMaxSize().graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = panX; translationY = panY; rotationZ = (edits?.pages?.getOrNull(selected)?.rotation ?: 0).toFloat() }) }
