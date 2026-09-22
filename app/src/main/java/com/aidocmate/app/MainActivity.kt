@@ -49,7 +49,7 @@ fun DocMateApp(context: Context) {
     var newName by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<SavedDoc?>(null) }
     var search by remember { mutableStateOf("") }
-    var exportCsv by remember { mutableStateOf(false) }
+    var exportCsv by remember { mutableStateOf(false) }\n    var exportMode by remember { mutableStateOf("txt") }
 
     LaunchedEffect(Unit) { history = withContext(Dispatchers.IO) { store.list() } }
     suspend fun saveResult(result: String) {
@@ -71,7 +71,7 @@ fun DocMateApp(context: Context) {
             }
         }
     }
-    val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+    val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
         if (uri != null) {
             val snapshot = if (exportCsv) StructuredExtractor.csv(doc?.pages?.joinToString("\n") { it.text } ?: "") else ResultFormatter.clean(output)
             scope.launch {
