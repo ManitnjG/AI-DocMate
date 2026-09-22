@@ -107,10 +107,10 @@ fun DocMateApp(context: Context) {
     Scaffold(topBar = { TopAppBar(title = { Text("AI DocMate") }, actions = { TextButton(onClick = { settings = true }, enabled = !busy) { Text("About") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Your documents, explained", style = MaterialTheme.typography.headlineSmall)
-            Text("PDF and image import • private local history • answers with sources")
+            Text("PDF, DOCX, TXT and image import • private local history • answers with sources")
             if (!AiClient.configured) Text("Cloud AI is awaiting activation. Use the offline tools below.", style = MaterialTheme.typography.bodySmall)
-            Button(onClick = { picker.launch(arrayOf("application/pdf", "image/jpeg", "image/png")) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Import PDF or photo") }
-            Text("Up to 25 MB / 100 PDF pages. Scan recognition: Latin text. Selectable Tamil PDF text can be used with cloud AI.", style = MaterialTheme.typography.bodySmall)
+            Button(onClick = { picker.launch(arrayOf("application/pdf", "image/jpeg", "image/png", "text/plain", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Import PDF or photo") }
+            Text("Up to 25 MB / 100 PDF pages. PDF, DOCX and TXT text import supported. Scan recognition currently supports Latin text.", style = MaterialTheme.typography.bodySmall)
             if (busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Processing… Please keep the app open.") }
             doc?.let { current ->
                 Text(current.name, style = MaterialTheme.typography.titleLarge)
