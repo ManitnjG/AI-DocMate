@@ -12,5 +12,6 @@ class PageEditsTest {
         edits.undo(); edits.delete(0); assertFalse(edits.canRedo)
     }
     @Test(expected = IllegalArgumentException::class) fun cannotDeleteLastPage() { PageEdits(1).delete(0) }
+    @Test fun blankPageCanBeUndone() { val edits = PageEdits(1); edits.insertBlank(0); assertEquals(-1, edits.pages[1].source); edits.undo(); assertEquals(1, edits.pages.size) }
     @Test fun fourRotationsRestoreOrientation() { val edits = PageEdits(1); repeat(4) { edits.rotate(0) }; assertEquals(0, edits.pages[0].rotation) }
 }

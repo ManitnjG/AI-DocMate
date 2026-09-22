@@ -14,6 +14,7 @@ class PageEdits(count: Int) {
         past.add(pages); if (past.size > 50) past.removeAt(0)
         pages = next.toList(); future.clear()
     }
+    fun insertBlank(index: Int) = change(pages.toMutableList().apply { add(index + 1, EditorPage(-1)) })
     fun rotate(index: Int) = change(pages.mapIndexed { i, p -> if (i == index) p.copy(rotation = (p.rotation + 90) % 360) else p })
     fun delete(index: Int) = change(pages.filterIndexed { i, _ -> i != index })
     fun duplicate(index: Int) = change(pages.toMutableList().apply { add(index + 1, pages[index]) })

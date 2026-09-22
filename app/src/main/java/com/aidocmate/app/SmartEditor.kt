@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -16,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -68,21 +70,85 @@ private fun loadEditorSource(context: Context, uri: Uri): File {
     var preview by remember { mutableStateOf<Bitmap?>(null) }
     var zoom by remember { mutableFloatStateOf(1f) }
     var panX by remember { mutableFloatStateOf(0f) }; var panY by remember { mutableFloatStateOf(0f) }
+    BackHandler { if (!busy) onBack() }
     DisposableEffect(Unit) { onDispose { source?.delete() } }
+    var exportOnlyPage by remember { mutableStateOf(false) }
+    var cameraFile by remember { mutableStateOf<File?>(null) }
+    DisposableEffect(Unit) { onDispose { cameraFile?.delete() } }
+    fun openSource(uri: Uri) {
+        busy = true
+        scope.launch {
+            var loaded: File? = null
+            try {
+                loaded = withContext(Dispatchers.IO) { loadEditorSource(context, uri) }
+                val count = withContext(Dispatchers.IO) { PDDocument.load(loaded).use { it.numberOfPages } }
+                source?.delete(); source = loaded; loaded = null
+                edits = PageEdits(count); selected = 0; revision++
+                message = "Offline • pinch to zoom and drag to pan"
+            } catch (e: Exception) { message = "Open failed: ${e.message}" }
+            finally { loaded?.delete(); cameraFile?.delete(); cameraFile = null; busy = false }
+        }
+    }
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        val file = cameraFile
+        if (ok && file != null) openSource(Uri.fromFile(file))
+        else { file?.delete(); cameraFile = null; message = "Capture cancelled." }
+    }
+    fun launchCamera() {
+        try {
+            val dir = File(context.cacheDir, "camera").apply { mkdirs() }
+            val file = File.createTempFile("capture", ".jpg", dir); cameraFile = file
+            camera.launch(androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file))
+        } catch (e: Exception) { cameraFile?.delete(); cameraFile = null; message = "Camera unavailable: ${e.message}" }
+    }
+    val cameraPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed ->
+        if (allowed) launchCamera() else message = "Camera permission denied. You can still import a photo."
+    }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) { busy = true; scope.launch {
-            try { val file = withContext(Dispatchers.IO) { loadEditorSource(context, uri) }
-                val count = withContext(Dispatchers.IO) { PDDocument.load(file).use { it.numberOfPages } }
-                source?.delete(); source = file; edits = PageEdits(count); selected = 0; revision++; message = "Offline • pinch to zoom and drag to pan"
-            } catch (e: Exception) { message = "Open failed: ${e.message}" } finally { busy = false }
-        } }
+        if (uri != null) openSource(uri)
+    }
+
+    val merger = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) {
+            busy = true
+            scope.launch {
+                val inputs = mutableListOf<File>()
+                var merged: File? = null
+                try {
+                    require(uris.size <= 20) { "Select at most 20 documents" }
+                    val result = withContext(Dispatchers.IO) {
+                        val output = File.createTempFile("editor-merged", ".pdf", context.cacheDir)
+                        merged = output
+                        PDDocument().use { target ->
+                            val utility = com.tom_roush.pdfbox.multipdf.PDFMergerUtility()
+                            var totalBytes = 0L
+                            for (uri in uris) {
+                                val input = loadEditorSource(context, uri); inputs.add(input)
+                                totalBytes += input.length()
+                                require(totalBytes <= 100L * 1024 * 1024) { "Combined files exceed 100 MB" }
+                                PDDocument.load(input).use { document ->
+                                    require(target.numberOfPages + document.numberOfPages <= 100) { "Combined document exceeds 100 pages" }
+                                    utility.appendDocument(target, document)
+                                }
+                            }
+                            target.save(output)
+                            output to target.numberOfPages
+                        }
+                    }
+                    source?.delete(); source = result.first; merged = null
+                    edits = PageEdits(result.second); selected = 0; revision++
+                    message = "Combined ${uris.size} documents. Review page order, then export PDF."
+                } catch (e: Exception) { message = "Merge failed: ${e.message}" }
+                finally { inputs.forEach { it.delete() }; merged?.delete(); busy = false }
+            }
+        }
     }
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
-        val file = source; val pages = edits?.pages?.toList()
+        val file = source; val pages = edits?.pages?.let { if (exportOnlyPage) listOf(it[selected]) else it.toList() }
         if (uri != null && file != null && pages != null) { busy = true; scope.launch {
             try { withContext(Dispatchers.IO) {
                 PDDocument.load(file).use { original -> PDDocument().use { result ->
-                    pages.forEach { spec -> val imported = result.importPage(original.getPage(spec.source)); imported.rotation = (imported.rotation + spec.rotation) % 360 }
+                    pages.forEach { spec -> val imported = if (spec.source < 0) PDPage(PDRectangle.A4).also { result.addPage(it) } else result.importPage(original.getPage(spec.source)).apply { resources = original.getPage(spec.source).resources; cropBox = original.getPage(spec.source).cropBox; mediaBox = original.getPage(spec.source).mediaBox }; imported.rotation = (imported.rotation + spec.rotation) % 360 }
                     context.contentResolver.openOutputStream(uri)?.use { result.save(it) } ?: error("Cannot write destination")
                 } }
             }; message = "PDF exported successfully." } catch (e: Exception) { message = "Export failed: ${e.message}. Choose a new destination and retry." } finally { busy = false }
@@ -93,7 +159,7 @@ private fun loadEditorSource(context: Context, uri: Uri): File {
         val pageSpec = edits?.pages?.getOrNull(selected) ?: return@LaunchedEffect
         zoom = 1f; panX = 0f; panY = 0f
         try { preview = withContext(Dispatchers.IO) {
-            ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd -> PdfRenderer(fd).use { renderer -> renderer.openPage(pageSpec.source).use { page ->
+            if (pageSpec.source < 0) Bitmap.createBitmap(990, 1400, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.WHITE) } else ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd -> PdfRenderer(fd).use { renderer -> renderer.openPage(pageSpec.source).use { page ->
                 val scale = 1400f / maxOf(page.width, page.height)
                 Bitmap.createBitmap((page.width * scale).toInt().coerceAtLeast(1), (page.height * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888).also { bitmap -> bitmap.eraseColor(android.graphics.Color.WHITE); page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY) }
             } } }
@@ -103,10 +169,14 @@ private fun loadEditorSource(context: Context, uri: Uri): File {
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row { TextButton(onClick = onBack, enabled = !busy) { Text("Back") }; Text("Smart Editor", style = MaterialTheme.typography.headlineSmall) }
         Row { Button(onClick = { picker.launch(arrayOf("application/pdf", "image/jpeg", "image/png")) }, enabled = !busy) { Text("Open") }
-            TextButton(onClick = { exporter.launch("DocMate-edited.pdf") }, enabled = source != null && !busy) { Text("Export PDF") } }
+            TextButton(onClick = { exportOnlyPage = false; exporter.launch("DocMate-edited.pdf") }, enabled = source != null && !busy) { Text("Export PDF") } }
+        Row(Modifier.horizontalScroll(rememberScrollState())) {
+            TextButton(onClick = { cameraPermission.launch(android.Manifest.permission.CAMERA) }, enabled = !busy) { Text("Capture photo") }
+            TextButton(onClick = { merger.launch(arrayOf("application/pdf", "image/jpeg", "image/png")) }, enabled = !busy && source == null) { Text("Merge PDFs / photos") }
+        }
         Text(message, style = MaterialTheme.typography.bodySmall)
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-        Box(Modifier.weight(1f).fillMaxWidth().pointerInput(source, selected) { detectTransformGestures { _, pan, scale, _ -> zoom = (zoom * scale).coerceIn(1f, 5f); panX += pan.x; panY += pan.y } }) {
+        Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().pointerInput(source, selected) { detectTransformGestures { _, pan, scale, _ -> zoom = (zoom * scale).coerceIn(1f, 5f); panX = (panX + pan.x).coerceIn(-2000f, 2000f); panY = (panY + pan.y).coerceIn(-2000f, 2000f) } }) {
             preview?.let { bitmap -> Image(bitmap.asImageBitmap(), "Page ${selected + 1}", Modifier.fillMaxSize().graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = panX; translationY = panY; rotationZ = (edits?.pages?.getOrNull(selected)?.rotation ?: 0).toFloat() }) }
         }
         val model = edits
@@ -115,6 +185,8 @@ private fun loadEditorSource(context: Context, uri: Uri): File {
             Row(Modifier.horizontalScroll(rememberScrollState())) {
                 TextButton(onClick = { edit { it.undo() } }, enabled = model.canUndo && !busy) { Text("Undo") }
                 TextButton(onClick = { edit { it.redo() } }, enabled = model.canRedo && !busy) { Text("Redo") }
+                TextButton(onClick = { exportOnlyPage = true; exporter.launch("DocMate-page-${selected + 1}.pdf") }, enabled = !busy) { Text("Extract page") }
+                TextButton(onClick = { edit { it.insertBlank(selected) } }, enabled = !busy && model.pages.size < 100) { Text("Blank page") }
                 TextButton(onClick = { edit { it.rotate(selected) } }, enabled = !busy) { Text("Rotate") }
                 TextButton(onClick = { edit { it.duplicate(selected) } }, enabled = !busy && model.pages.size < 100) { Text("Duplicate") }
                 TextButton(onClick = { edit { it.delete(selected) } }, enabled = !busy && model.pages.size > 1) { Text("Delete") }
