@@ -69,6 +69,24 @@ class ScannerIntegrationTest {
         try { assertTrue(small.length() < high.length()); PDDocument.load(small).use { assertEquals(2, it.numberOfPages) } }
         finally { small.parentFile?.deleteRecursively(); high.parentFile?.deleteRecursively(); image.delete() }
     }
+    @Test fun scanResultDuringDraftLoadingIsNotLost() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val image = sample()
+        val models = androidx.lifecycle.ViewModelStore()
+        lateinit var vm: ScanViewModel
+        instrumentation.runOnMainSync {
+            vm = androidx.lifecycle.ViewModelProvider(models, androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory(context.applicationContext as android.app.Application))[ScanViewModel::class.java]
+            vm.import(listOf(Uri.fromFile(image)), null)
+        }
+        var complete = false
+        for (attempt in 0 until 100) {
+            instrumentation.runOnMainSync { complete = !vm.busy && vm.draft.pages.size == 1 }
+            if (complete) break
+            Thread.sleep(100)
+        }
+        try { assertTrue("A scan returned during restore was lost", complete) }
+        finally { instrumentation.runOnMainSync { models.clear() }; image.delete() }
+    }
     @Test fun cancelledExportLeavesDraftIntact() {
         val image = sample(); val store = ScanDraftStore(context); val draft = store.importPages(listOf(Uri.fromFile(image)))
         try { ScanPdfExporter(context).export(draft, store, AtomicBoolean(true)) {}; fail("Expected cancellation") } catch (_: IllegalStateException) { }

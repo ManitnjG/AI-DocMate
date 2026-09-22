@@ -17,14 +17,19 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     var message by mutableStateOf("Loading saved scan…"); private set
     var modelsReady by mutableStateOf(false); private set
     private val cancelled = AtomicBoolean(false)
+    private var pendingImport: Pair<List<Uri>, String?>? = null
+    override fun onCleared() { cancelled.set(true); super.onCleared() }
     init { runTask { draft = withContext(Dispatchers.IO) { store.load() }; refreshModels(); message = if (draft.pages.isEmpty()) "Start a scan or import photos." else "Restored ${draft.pages.size} saved pages." } }
     private suspend fun refreshModels() { modelsReady = withContext(Dispatchers.IO) { OcrModels(getApplication()).ready(draft.language) } }
     private fun runTask(action: suspend () -> Unit) {
         busy = true; cancelled.set(false)
-        viewModelScope.launch { try { action() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { message = e.message ?: "Scan operation failed; your saved draft is unchanged." } finally { busy = false } }
+        viewModelScope.launch { try { action() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { message = e.message ?: "Scan operation failed; your saved draft is unchanged." } finally {
+            busy = false
+            pendingImport?.let { pending -> pendingImport = null; import(pending.first, pending.second) }
+        } }
     }
     fun status(value: String) { message = value }
-    fun import(uris: List<Uri>, replacement: String?) { if (busy) return; runTask {
+    fun import(uris: List<Uri>, replacement: String?) { if (busy) { pendingImport = uris.toList() to replacement; return }; runTask {
         message = "Saving scan pages…"
         draft = withContext(Dispatchers.IO) { store.importPages(uris, replacement) }
         message = "Draft saved: ${draft.pages.size} pages. Quality warnings are advisory; inspect the preview."
