@@ -81,6 +81,9 @@ class DocumentStore(private val context: Context) {
                 while (true) { val n = input.read(buffer); if (n < 0) break; total += n
                     require(total <= 25 * 1024 * 1024) { "Choose a file smaller than 25 MB" }; out.write(buffer, 0, n) }
             } } ?: error("Cannot open this file")
+            val header = ByteArray(5)
+            tmp.inputStream().use { it.read(header) }
+            val isPdf = String(header, Charsets.US_ASCII) == "%PDF-"
             require(ocrLanguage in com.aidocmate.app.scan.OcrLanguages.names) { "Unsupported OCR language" }
             val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
             var tess: com.googlecode.tesseract.android.TessBaseAPI? = null
@@ -100,9 +103,9 @@ class DocumentStore(private val context: Context) {
                 when {
                     extension == "txt" -> listOf(DocPage(1, tmp.readText()))
                     extension == "docx" || extension == "pptx" -> officePages(tmp, extension)
-                    resolver.getType(uri) == "application/pdf" || extension == "pdf" -> {
+                    isPdf || resolver.getType(uri) == "application/pdf" || extension == "pdf" -> {
                         val extracted = PDDocument.load(tmp).use { pdf ->
-                            require(pdf.numberOfPages <= 100) { "Choose a PDF with at most 100 pages" }
+                            require(pdf.numberOfPages in 1..100) { "Choose a PDF with at most 100 pages" }
                             (1..pdf.numberOfPages).map { n -> val stripper = PDFTextStripper(); stripper.startPage = n; stripper.endPage = n; DocPage(n, stripper.getText(pdf)) }
                         }
                         if (extracted.any { it.text.isBlank() }) {
