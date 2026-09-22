@@ -38,6 +38,17 @@ class ApiTests(unittest.TestCase):
     def test_long_summary_explicit_error(self):
         self.payload.update(mode='summary', pages=[{'number': 1, 'text': 'abc ' * 15000}])
         self.assertEqual(self.client.post('/ask', json=self.payload, headers=self.headers).status_code, 422)
+    def test_provider_deadline_returns_excerpts(self):
+        import asyncio
+        async def slow(*args):
+            await asyncio.sleep(1)
+            return 'Late answer [p.1]', 'openrouter'
+        with patch('main.complete', new=slow), patch('main.AI_DEADLINE_SECONDS', 0.01):
+            response = self.client.post('/ask', json=self.payload, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['provider'], 'extractive')
+        self.assertEqual(response.json()['sources'][0]['page'], 1)
+
     def test_rate_limit(self):
         self.payload['question'] = 'bananas'
         for _ in range(10):

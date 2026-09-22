@@ -52,7 +52,7 @@ object AiClient {
             check(response.isSuccessful) { data.optString("detail", "Request failed (${response.code})") }
             val sources = data.optJSONArray("sources")
             buildString {
-                append(if (data.optString("provider") == "openrouter") "AI answer\n\n" else "Source search (not AI)\n\n")
+                append(if (data.optString("provider") in setOf("openrouter", "groq")) "AI answer\n\n" else "Source search (not AI)\n\n")
                 append(data.getString("answer"))
                 if (sources != null && sources.length() > 0) {
                     append("\n\nSupporting excerpts\n")

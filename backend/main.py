@@ -18,6 +18,7 @@ logger = logging.getLogger("uvicorn.error")
 
 app = FastAPI(title="AI DocMate", version="0.3.0")
 WINDOW = 60
+AI_DEADLINE_SECONDS = 65
 requests = defaultdict(deque)
 
 class Page(BaseModel):
@@ -90,7 +91,7 @@ async def complete_with_provider(context, question, language, provider, key, mod
     payload = {"model": model, "max_tokens": 1800,
                "messages": [{"role": "system", "content": system},
                             {"role": "user", "content": "EXCERPTS:\n" + context + "\nQUESTION:\n" + question}]}
-    async with httpx.AsyncClient(timeout=45) as client:
+    async with httpx.AsyncClient(timeout=20) as client:
         r = await client.post(url, headers=headers, json=payload)
         if r.is_error:
             logger.warning("DocMate %s provider HTTP status=%s", provider, r.status_code)
@@ -145,7 +146,11 @@ async def ask(x: Ask):
     if not selected:
         return {"answer": "Not found in the document.", "provider": "extractive", "sources": []}
     context = "\n\n".join(f"[p.{c['page']}] {c['quote']}" for c in selected)
-    answer, provider = await complete(context, x.question, x.language)
+    try:
+        answer, provider = await asyncio.wait_for(complete(context, x.question, x.language), timeout=AI_DEADLINE_SECONDS)
+    except asyncio.TimeoutError:
+        logger.warning("DocMate AI deadline reached; returning source excerpts")
+        answer, provider = None, None
     if answer:
         valid = {c["page"] for c in selected}
         cited = {int(n) for n in re.findall(r"\[p\.(\d+)\]", answer)}
