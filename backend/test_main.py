@@ -49,6 +49,18 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.json()['provider'], 'extractive')
         self.assertEqual(response.json()['sources'][0]['page'], 1)
 
+    def test_followup_retrieves_evidence_from_previous_question(self):
+        self.payload.update(question='What about it?', history=[{'question':'When is payment due?', 'answer':'10 October [p.1]'}])
+        with patch('main.complete', new=AsyncMock(return_value=('The payment is due on 10 October [p.1]', 'openrouter'))) as provider:
+            result=self.client.post('/ask',json=self.payload,headers=self.headers)
+        self.assertEqual(result.status_code,200)
+        self.assertEqual(result.json()['sources'][0]['page'],1)
+        self.assertIn('CURRENT question',provider.call_args.args[1])
+
+    def test_conversation_history_is_bounded(self):
+        self.payload['history']=[{'question':'Q','answer':'A'}]*5
+        self.assertEqual(self.client.post('/ask',json=self.payload,headers=self.headers).status_code,422)
+
     def test_rate_limit(self):
         self.payload['question'] = 'bananas'
         for _ in range(10):

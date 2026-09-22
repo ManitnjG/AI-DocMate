@@ -76,7 +76,7 @@ class DocumentStore(private val context: Context) {
         }
     }
 
-    suspend fun import(uri: Uri, ocrLanguage: String = "eng"): SavedDoc = withContext(Dispatchers.IO) {
+    suspend fun import(uri: Uri, ocrLanguage: String = "eng", documentId: String = UUID.randomUUID().toString()): SavedDoc = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
         val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: "Document"
         val extension = name.substringAfterLast('.', "").lowercase()
@@ -138,7 +138,7 @@ class DocumentStore(private val context: Context) {
             } finally { recognizer.close(); tess?.recycle() }
             require(pages.any { it.text.isNotBlank() }) { "No text detected. Try a clearer scan or select the correct OCR language." }
             require(pages.sumOf { it.text.length } <= 1_000_000) { "Document text is too large" }
-            SavedDoc(UUID.randomUUID().toString(), name, pages).also { save(it) }
+            SavedDoc(documentId, name, pages).also { save(it) }
         } finally { tmp.delete() }
     }
 }

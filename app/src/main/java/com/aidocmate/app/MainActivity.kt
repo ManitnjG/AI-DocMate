@@ -62,7 +62,7 @@ class MainActivity : ComponentActivity() {
     }
     LaunchedEffect(doc?.id) { doc?.let { prefs.edit().putString("activeDoc",it.id).apply() } }
     if(showConversation) AlertDialog(onDismissRequest={showConversation=false},title={Text("Conversation history")},text={Column(Modifier.heightIn(max=440.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-        val entries=jobs.filter { it.docId==doc?.id }
+        val entries=jobs.filter { it.kind=="ai" && it.docId==doc?.id }
         if(entries.isEmpty()) Text("Questions and answers will be saved here.")
         entries.forEach { item->
             Text(item.question,fontWeight=FontWeight.Bold)
@@ -74,7 +74,12 @@ class MainActivity : ComponentActivity() {
         }
     }},confirmButton={TextButton(onClick={showConversation=false}){Text("Close")}})
     suspend fun saveResult(result:String){output=result;doc?.let{current->val updated=current.copy(result=result);withContext(Dispatchers.IO){store.save(updated)};doc=updated;history=withContext(Dispatchers.IO){store.list()}}}
-    val picker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){uri->if(uri!=null&&!busy){doc=null;output="Reading document…";busy=true;scope.launch{try{doc=store.import(uri, ocrLanguage);output="Loaded ${doc!!.pages.size} pages/slides. Ask a question or view the source text.";history=withContext(Dispatchers.IO){store.list()}}catch(e:Exception){output="Import failed: ${e.message}"}finally{busy=false}}}}
+    val picker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if(uri!=null) scope.launch {
+            try { withContext(Dispatchers.IO) { AssistantJobs.importDocument(context,uri,ocrLanguage) }; output="Import queued. OCR can continue in the background; open the result from Saved documents." }
+            catch(e:Exception) { output="Could not queue import: ${e.message}" }
+        }
+    }
     val exporter=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")){uri->if(uri!=null){val snapshot=if(exportCsv)StructuredExtractor.csv(doc?.pages?.joinToString("\n"){it.text}?:"")else ResultFormatter.clean(output);scope.launch{try{withContext(Dispatchers.IO){context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use{it.write(snapshot)}?:error("Cannot write file")}}catch(e:Exception){output="Export failed: ${e.message}"}}}}
     var exportMessage by remember { mutableStateOf("") }
     var citationPage by remember { mutableStateOf<DocPage?>(null) }
@@ -143,6 +148,10 @@ class MainActivity : ComponentActivity() {
         Button(onClick={picker.launch(arrayOf("application/pdf","image/jpeg","image/png","text/plain","application/vnd.openxmlformats-officedocument.wordprocessingml.document","application/vnd.openxmlformats-officedocument.presentationml.presentation"))},enabled=!busy,modifier=Modifier.fillMaxWidth().height(52.dp),shape=RoundedCornerShape(16.dp)){Text(if(doc==null)"Import Document or Photo" else "Import Another Document",fontWeight=FontWeight.SemiBold)}
         TextButton(onClick = { ocrDialog = true }, enabled = !busy) { Text("OCR language: ${com.aidocmate.app.scan.OcrLanguages.names[ocrLanguage] ?: "English"}") }
         Text("Up to 25 MB / 100 PDF pages. DOCX, PPTX and TXT text extraction works offline. Select the scan language before importing photos or scanned PDFs.",style=MaterialTheme.typography.bodySmall)
+        jobs.filter { it.kind=="import" && it.status in listOf("queued","running","failed") }.take(5).forEach { job ->
+            Text("Document import: ${job.status}. ${job.answer}",style=MaterialTheme.typography.bodySmall)
+            if(job.status!="failed") TextButton(onClick={AssistantJobs.cancel(context,job.id)}) { Text("Cancel import") }
+        }
         if(busy){LinearProgressIndicator(Modifier.fillMaxWidth());Text("Processing… Please keep the app open.")}
         doc?.let{current->
             val activeJobs=jobs.filter { it.docId==current.id && it.status in listOf("queued","running","retrying") }

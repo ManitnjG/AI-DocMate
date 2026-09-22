@@ -39,7 +39,7 @@ object EditorRenderer {
                     if(mark.kind == "replace") canvas.drawRect(rect,Paint().apply { color = mark.background })
                     val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                         color = mark.color; textSize = mark.size*h
-                        typeface = Typeface.create(mark.family,(if(mark.bold) Typeface.BOLD else 0) or (if(mark.italic) Typeface.ITALIC else 0))
+                        typeface = Typeface.create(mark.family,when { mark.bold && mark.italic -> Typeface.BOLD_ITALIC; mark.bold -> Typeface.BOLD; mark.italic -> Typeface.ITALIC; else -> Typeface.NORMAL })
                     }
                     val layout = StaticLayout.Builder.obtain(mark.text,0,mark.text.length,textPaint,rect.width().toInt().coerceAtLeast(1))
                         .setAlignment(Layout.Alignment.ALIGN_NORMAL).setIncludePad(false).build()

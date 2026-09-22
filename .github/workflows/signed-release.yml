@@ -1,0 +1,54 @@
+name: Signed production candidate
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checks:
+    uses: ./.github/workflows/android.yml
+  signed:
+    needs: checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require owner signing credentials
+        env:
+          KEYSTORE: ${{ secrets.DOCMATE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.DOCMATE_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.DOCMATE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.DOCMATE_KEY_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE" && test -n "$STORE_PASSWORD" && test -n "$KEY_ALIAS" && test -n "$KEY_PASSWORD" || { echo 'Owner signing secrets are required. No debug key will be substituted.'; exit 1; }
+          umask 077
+          printf '%s' "$KEYSTORE" | base64 --decode > "$RUNNER_TEMP/docmate-release.jks"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          log-accepted-android-sdk-licenses: false
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build signed APK and app bundle
+        env:
+          DOCMATE_KEYSTORE: ${{ runner.temp }}/docmate-release.jks
+          DOCMATE_STORE_PASSWORD: ${{ secrets.DOCMATE_STORE_PASSWORD }}
+          DOCMATE_KEY_ALIAS: ${{ secrets.DOCMATE_KEY_ALIAS }}
+          DOCMATE_KEY_PASSWORD: ${{ secrets.DOCMATE_KEY_PASSWORD }}
+          DOCMATE_API_URL: ${{ vars.DOCMATE_API_URL }}
+        run: gradle testReleaseUnitTest lintRelease assembleRelease bundleRelease
+      - name: Verify APK signature
+        run: '"$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AI-DocMate-signed-production-candidate
+          path: |
+            app/build/outputs/apk/release/app-release.apk
+            app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+      - name: Remove temporary key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/docmate-release.jks"
