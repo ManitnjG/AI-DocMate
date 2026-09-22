@@ -1,11 +1,11 @@
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id("org.jetbrains.kotlin.plugin.compose") }
 android { namespace="com.aidocmate.app"; compileSdk=35
- defaultConfig { applicationId="com.aidocmate.app"; minSdk=26; targetSdk=35; versionCode=4; versionName="0.4.0" }
+ defaultConfig { applicationId="com.aidocmate.app"; minSdk=26; targetSdk=35; versionCode=5; versionName="0.4.1" }
  compileOptions { sourceCompatibility=JavaVersion.VERSION_17; targetCompatibility=JavaVersion.VERSION_17 }
  kotlinOptions { jvmTarget="17" }
  buildFeatures { compose=true; buildConfig=true }
  defaultConfig {
-  val serviceUrl = providers.environmentVariable("DOCMATE_API_URL").orElse("").get()
+  val serviceUrl = providers.environmentVariable("DOCMATE_API_URL").orNull?.takeIf { it.isNotBlank() } ?: "https://ai-docmate-boli.onrender.com"
   require(serviceUrl.isEmpty() || (serviceUrl.startsWith("https://") && serviceUrl.matches(Regex("https://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/[A-Za-z0-9/_-]*)?")))) { "DOCMATE_API_URL must be an HTTPS service URL" }
   buildConfigField("String", "DOCMATE_API_URL", "\"$serviceUrl\"")
  }
