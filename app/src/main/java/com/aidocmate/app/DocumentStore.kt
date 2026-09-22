@@ -15,7 +15,8 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.util.UUID\nimport java.util.zip.ZipInputStream
+import java.util.UUID
+import java.util.zip.ZipInputStream
 
 data class DocPage(val number: Int, val text: String)
 data class SavedDoc(val id: String, val name: String, val pages: List<DocPage>, val result: String = "", val favorite: Boolean = false, val tags: List<String> = emptyList())
