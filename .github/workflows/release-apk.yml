@@ -1,0 +1,47 @@
+name: Build and Release APK
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Backend tests
+        run: |
+          pip install -r backend/requirements.txt
+          python -m unittest discover -s backend -v
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          log-accepted-android-sdk-licenses: false
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build APK
+        run: gradle testDebugUnitTest lintDebug assembleDebug
+        env:
+          DOCMATE_API_URL: ${{ vars.DOCMATE_API_URL }}
+      - name: Package APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk AI-DocMate-v0.7.0.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AI-DocMate-v0.7.0-apk
+          path: AI-DocMate-v0.7.0.apk
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: AI-DocMate-v0.7.0.apk
+          generate_release_notes: true
