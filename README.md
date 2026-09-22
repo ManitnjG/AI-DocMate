@@ -7,6 +7,7 @@ Version 0.7.0 is a pilot with real local document processing and an optional aut
 - On-device Latin-script OCR for images and PDF pages without selectable text.
 - Private device document history, name search, rename and delete; latest result saved per document.
 - Page-labelled source text; offline date, amount and phone extraction.
+- System dark mode, scrollable compact action rows, and full cited-page text inspection.
 - Cloud questions and summaries with source excerpts, English/Tamil answer selection, and confirmation before sending extracted text.
 - HTTPS-only service connection; automatically issued session encrypted with Android Keystore; provider key stays on the server.
 - Customer-facing About/privacy screen replaces developer connection settings.

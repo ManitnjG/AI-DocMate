@@ -202,7 +202,7 @@ private fun loadEditorSource(context: Context, uri: Uri): File {
         } } catch (e: Exception) { preview = null; message = "Preview failed: ${e.message}" }
     }
     fun edit(action: (PageEdits) -> Unit) { try { edits?.let(action); selected = selected.coerceAtMost((edits?.pages?.size ?: 1) - 1); revision++ } catch (e: Exception) { message = e.message ?: "Cannot edit page" } }
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row { TextButton(onClick = { requestClose() }, enabled = !busy) { Text("Back") }; Text("Smart Editor", style = MaterialTheme.typography.headlineSmall) }
         Row { Button(onClick = { picker.launch(arrayOf("application/pdf", "image/jpeg", "image/png")) }, enabled = !busy && source == null) { Text("Open") }
             TextButton(onClick = { exportRange = ""; exportOnlyPage = false; exporter.launch("DocMate-edited.pdf") }, enabled = source != null && !busy) { Text("Export PDF") } }
