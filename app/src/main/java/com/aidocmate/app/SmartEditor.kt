@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.ViewModelProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -163,10 +164,10 @@ import kotlin.math.min
                     listOf("select" to "⌖\nEdit","text" to "T\nText","ocr" to "⌗\nAI OCR","ink" to "✎\nSign","highlight" to "▰\nMarkup","pages" to "▤\nPages").forEach { pair ->
                         val key=pair.first; val label=pair.second; val active=tool==key
                         Surface(Modifier.width(68.dp).clickable(enabled=!vm.busy){when(key){"ocr"->{tool="select";vm.recognize(language)};"pages"->vm.change{it.rotate(selected)};else->tool=key}},shape=RoundedCornerShape(16.dp),color=if(active)DocMateBlue.copy(alpha=.18f) else MaterialTheme.colorScheme.surfaceVariant) {
-                            Text(label,Modifier.padding(vertical=9.dp),textAlign=androidx.compose.ui.text.style.TextAlign.Center,fontWeight=if(active)FontWeight.Bold else FontWeight.Medium,color=if(active)DocMateBlue else MaterialTheme.colorScheme.onSurface)
+                            Text(label,Modifier.padding(vertical=9.dp),textAlign=TextAlign.Center,fontWeight=if(active)FontWeight.Bold else FontWeight.Medium,color=if(active)DocMateBlue else MaterialTheme.colorScheme.onSurface)
                         }
                     }
-                    Surface(Modifier.width(68.dp).clickable{languageDialog=true},shape=RoundedCornerShape(16.dp),color=MaterialTheme.colorScheme.surfaceVariant){Text("⋯\nMore",Modifier.padding(vertical=9.dp),textAlign=androidx.compose.ui.text.style.TextAlign.Center)}
+                    Surface(Modifier.width(68.dp).clickable{languageDialog=true},shape=RoundedCornerShape(16.dp),color=MaterialTheme.colorScheme.surfaceVariant){Text("⋯\nMore",Modifier.padding(vertical=9.dp),textAlign=TextAlign.Center)}
                 }
             }
         }
