@@ -2,10 +2,12 @@ name: Build and Release APK
 on:
   workflow_dispatch:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+    paths:
+      - '.github/workflows/release-apk.yml'
+      - '.release-trigger'
 permissions:
-  contents: read
+  contents: write
 jobs:
   checks:
     uses: ./.github/workflows/android.yml
@@ -15,32 +17,28 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: AI-DocMate-debug-apk
           path: verified-apk
       - name: Package verified APK
         run: |
-          cp verified-apk/app-debug.apk AI-DocMate-pilot.apk
-          sha256sum AI-DocMate-pilot.apk > AI-DocMate-pilot.apk.sha256
+          cp verified-apk/app-debug.apk AI-DocMate-v0.8.0.apk
+          sha256sum AI-DocMate-v0.8.0.apk > AI-DocMate-v0.8.0.apk.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: AI-DocMate-verified-pilot-apk
+          name: AI-DocMate-v0.8.0-apk
           path: |
-            AI-DocMate-pilot.apk
-            AI-DocMate-pilot.apk.sha256
+            AI-DocMate-v0.8.0.apk
+            AI-DocMate-v0.8.0.apk.sha256
           if-no-files-found: error
-      - name: Publish pilot GitHub Release
-        uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          files: |
-            AI-DocMate-pilot.apk
-            AI-DocMate-pilot.apk.sha256
-          prerelease: true
-          body: |
-            Pilot debug APK. Passed backend tests, Android unit tests, lint and emulator integration tests.
-            This is not a signed Google Play production release. Physical-device and OCR-quality verification remain required.
-          generate_release_notes: true
-
-# manual-release-trigger: 2026-09-23
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v0.8.0 >/dev/null 2>&1; then
+            gh release upload v0.8.0 AI-DocMate-v0.8.0.apk AI-DocMate-v0.8.0.apk.sha256 --clobber
+          else
+            gh release create v0.8.0 AI-DocMate-v0.8.0.apk AI-DocMate-v0.8.0.apk.sha256 --target "$GITHUB_SHA" --title "AI DocMate v0.8.0" --generate-notes --prerelease
+          fi
