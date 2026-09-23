@@ -1,6 +1,6 @@
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id("org.jetbrains.kotlin.plugin.compose") }
 android { namespace="com.aidocmate.app"; compileSdk=35
- defaultConfig { testInstrumentationRunner="androidx.test.runner.AndroidJUnitRunner"; applicationId="com.aidocmate.app"; minSdk=26; targetSdk=35; versionCode=9; versionName="0.8.0" }
+ defaultConfig { testInstrumentationRunner="androidx.test.runner.AndroidJUnitRunner"; applicationId="com.aidocmate.app"; minSdk=26; targetSdk=35; versionCode=10; versionName="0.8.1" }
  compileOptions { sourceCompatibility=JavaVersion.VERSION_17; targetCompatibility=JavaVersion.VERSION_17 }
  kotlinOptions { jvmTarget="17" }
  val releaseKeyPath = providers.environmentVariable("DOCMATE_KEYSTORE").orNull
