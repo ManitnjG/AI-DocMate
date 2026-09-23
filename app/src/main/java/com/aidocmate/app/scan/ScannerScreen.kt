@@ -9,6 +9,9 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,6 +22,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelProvider
@@ -81,14 +88,28 @@ import kotlinx.coroutines.withContext
         text = { Text("Removes the saved draft pages from this device. Exported PDFs are kept.") },
         confirmButton = { TextButton(onClick = { clearConfirm = false; selected = 0; vm.update(draft.copy(pages = emptyList())) }) { Text("Delete draft") } },
         dismissButton = { TextButton(onClick = { clearConfirm = false }) { Text("Keep draft") } })
-    Scaffold(topBar = { TopAppBar(title = { Text("Document Scanner") }, navigationIcon = { TextButton(onClick = onBack) { Text("Back") } }) }) { padding ->
+    Scaffold(containerColor=Color(0xFF0B0B0F),topBar = { TopAppBar(colors=TopAppBarDefaults.topAppBarColors(containerColor=Color(0xFF0B0B0F),titleContentColor=Color.White,navigationIconContentColor=Color.White),title = { Text("Document Scanner",fontWeight=FontWeight.Bold) }, navigationIcon = { TextButton(onClick = onBack) { Text("‹",color=Color.White,style=MaterialTheme.typography.headlineMedium) } },actions={Text("▣",color=Color.White,modifier=Modifier.padding(16.dp))}) }) { padding ->
         LazyColumn(Modifier.padding(padding).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item {
-                Text("Auto-capture • crop & straighten • multi-page", style = MaterialTheme.typography.titleSmall)
-                Text("Use Auto capture, adjust the corners, then choose filters in the scanner. Tap Save to return pages to this draft. Returned pages and edits are saved automatically on this device.", style = MaterialTheme.typography.bodySmall)
-                Row(Modifier.horizontalScroll(rememberScrollState())) {
-                    Button(onClick = { scan() }, enabled = !vm.busy && !starting && draft.pages.size < 30) { Text(if (page == null) "Scan document" else "Add scan pages") }
-                    TextButton(onClick = { importer.launch(arrayOf("image/jpeg", "image/png")) }, enabled = !vm.busy && !starting && draft.pages.size < 30) { Text("Import photos") }
+                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                    listOf("◎\nAuto","ϟ\nFlash","⊞\nGrid","HD\nQuality").forEach{label->Surface(modifier=Modifier.weight(1f),shape=RoundedCornerShape(14.dp),color=Color(0xFF202026)){Text(label,color=Color.White,textAlign=androidx.compose.ui.text.style.TextAlign.Center,modifier=Modifier.padding(vertical=10.dp),style=MaterialTheme.typography.labelMedium)}}
+                }
+                Spacer(Modifier.height(10.dp))
+                Box(Modifier.fillMaxWidth().height(390.dp).background(Brush.verticalGradient(listOf(Color(0xFF292A2D),Color(0xFF121216))),RoundedCornerShape(24.dp)).border(1.dp,Color(0xFF36363E),RoundedCornerShape(24.dp)),contentAlignment=Alignment.Center){
+                    if(preview!=null) Image(preview!!.asImageBitmap(),"Scanner preview",Modifier.fillMaxSize().padding(22.dp))
+                    else Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(12.dp)){Text("▱",color=Color(0xFF28E0B5),style=MaterialTheme.typography.displayLarge);Text("Position document within frame",color=Color.White,fontWeight=FontWeight.SemiBold);Text("Edges are detected automatically",color=Color(0xFFB7B7C2),style=MaterialTheme.typography.bodySmall)}
+                    Box(Modifier.matchParentSize().padding(24.dp).border(2.dp,Color(0xFF24DDB3),RoundedCornerShape(14.dp)))
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth().background(Color(0xFF1B1B21),RoundedCornerShape(22.dp)).padding(4.dp),horizontalArrangement=Arrangement.SpaceEvenly){
+                    Surface(shape=RoundedCornerShape(18.dp),color=Color(0xFF087CFF)){Text("Single",color=Color.White,modifier=Modifier.padding(horizontal=22.dp,vertical=9.dp),fontWeight=FontWeight.Bold)}
+                    Text("Multi",color=Color(0xFFBDBDC8),modifier=Modifier.padding(9.dp));Text("Batch",color=Color(0xFFBDBDC8),modifier=Modifier.padding(9.dp))
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween){
+                    OutlinedButton(onClick={importer.launch(arrayOf("image/jpeg","image/png"))},enabled=!vm.busy&&!starting,shape=RoundedCornerShape(16.dp)){Text("▧  Gallery")}
+                    Button(onClick={scan()},enabled=!vm.busy&&!starting&&draft.pages.size<30,modifier=Modifier.size(76.dp),shape=RoundedCornerShape(38.dp),colors=ButtonDefaults.buttonColors(containerColor=Color.White),contentPadding=PaddingValues(4.dp)){Box(Modifier.fillMaxSize().border(4.dp,Color(0xFFB9BAC2),RoundedCornerShape(36.dp)))}
+                    Surface(shape=RoundedCornerShape(16.dp),color=Color(0xFF202026)){Text(if(draft.pages.isEmpty())"0" else draft.pages.size.toString(),color=Color.White,modifier=Modifier.padding(horizontal=20.dp,vertical=12.dp),fontWeight=FontWeight.Bold)}
                 }
             }
             item { Text(vm.message, style = MaterialTheme.typography.bodySmall); if (vm.busy || starting) LinearProgressIndicator(Modifier.fillMaxWidth()) }
