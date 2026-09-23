@@ -140,6 +140,17 @@ class MainActivity : ComponentActivity() {
     }){Text("Continue")}},dismissButton={TextButton(onClick={cloudConsent=false}){Text("Cancel")}})
     if(rename)AlertDialog(onDismissRequest={rename=false},title={Text("Rename document")},text={OutlinedTextField(newName,{newName=it.take(160)})},confirmButton={TextButton(onClick={doc?.let{current->scope.launch{try{val updated=current.copy(name=newName.trim().ifBlank{current.name});withContext(Dispatchers.IO){store.save(updated)};doc=updated;history=withContext(Dispatchers.IO){store.list()}}catch(e:Exception){output="Rename failed: ${e.message}"}}};rename=false}){Text("Save")}})
     deleteTarget?.let{target->AlertDialog(onDismissRequest={deleteTarget=null},title={Text("Delete ${target.name}?")},text={Text("Removes saved text and results from this device.")},confirmButton={TextButton(onClick={deleteTarget=null;scope.launch{try{withContext(Dispatchers.IO){AssistantJobStore(context).use{db->db.list(target.id).forEach{AssistantJobs.cancel(context,it.id)};db.deleteDocument(target.id)};store.delete(target)};history=withContext(Dispatchers.IO){store.list()};selectedDocs=selectedDocs-target.id;if(doc?.id==target.id){doc=null;output="Document deleted."}}catch(e:Exception){output="Delete failed: ${e.message}"}}}){Text("Delete")}},dismissButton={TextButton(onClick={deleteTarget=null}){Text("Cancel")}})}
+    if(doc==null) {
+        ModernDashboard(
+            history=history,
+            onScan={scannerOpen=true},
+            onEdit={editorOpen=true},
+            onImport={picker.launch(arrayOf("application/pdf","image/jpeg","image/png","text/plain","application/vnd.openxmlformats-officedocument.wordprocessingml.document","application/vnd.openxmlformats-officedocument.presentationml.presentation"))},
+            onOpenDoc={item->doc=item;output=item.result.ifBlank{"Loaded "+item.pages.size+" pages/slides."};question=""},
+            onSettings={settings=true}
+        )
+        return
+    }
     Scaffold(containerColor=MaterialTheme.colorScheme.background,topBar={TopAppBar(title={Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)){Box(Modifier.size(36.dp).background(Brush.linearGradient(listOf(Color(0xFF4F46E5),Color(0xFF0EA5E9),Color(0xFFF59E0B))),RoundedCornerShape(10.dp)),contentAlignment=Alignment.Center){Text("AI",color=Color.White,fontWeight=FontWeight.ExtraBold)};Column{Text("AI DocMate",fontWeight=FontWeight.Bold);Text("Intelligent document companion",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}}},actions={TextButton(onClick={settings=true},enabled=!busy){Text("Privacy")}},colors=TopAppBarDefaults.topAppBarColors(containerColor=MaterialTheme.colorScheme.surface))}){padding->Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(16.dp)){
         if(doc==null){ DocMateHero() }
         DocMateQuickActions(
