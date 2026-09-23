@@ -30,7 +30,7 @@ object AiClient {
             value
         }
     }
-    suspend fun ask(context: Context, pages: List<DocPage>, question: String, language: String, summary: Boolean): String = withContext(Dispatchers.IO) {
+    suspend fun ask(context: Context, pages: List<DocPage>, question: String, language: String, summary: Boolean, history: List<AssistantJob> = emptyList()): String = withContext(Dispatchers.IO) {
         val endpoint = BuildConfig.DOCMATE_API_URL
         check(configured) { "Cloud AI is not activated in this build. Offline tools are available." }
         var token = session(context, endpoint)
@@ -38,6 +38,9 @@ object AiClient {
         require(uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null) { "AI service address is invalid" }
         require(token.isNotBlank()) { "Could not start an AI session" }
         val payload = JSONObject().put("pages", pagesJson(pages)).put("question", question).put("language", language).put("mode", if (summary) "summary" else "question")
+        payload.put("history", org.json.JSONArray().apply { history.takeLast(4).forEach { item ->
+            put(JSONObject().put("question",item.question.take(2000)).put("answer",item.answer.take(6000)))
+        } })
         val request = Request.Builder().url(endpoint.trim().trimEnd('/') + "/ask").header("Authorization", "Bearer $token")
             .post(payload.toString().toRequestBody("application/json".toMediaType())).build()
         var first = client.newCall(request).execute()
@@ -52,7 +55,7 @@ object AiClient {
             check(response.isSuccessful) { data.optString("detail", "Request failed (${response.code})") }
             val sources = data.optJSONArray("sources")
             buildString {
-                append(if (data.optString("provider") == "openrouter") "AI answer\n\n" else "Source search (not AI)\n\n")
+                append(if (data.optString("provider") in setOf("openrouter", "groq")) "AI answer\n\n" else "Source search (not AI)\n\n")
                 append(data.getString("answer"))
                 if (sources != null && sources.length() > 0) {
                     append("\n\nSupporting excerpts\n")

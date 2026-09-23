@@ -43,6 +43,21 @@ class ScannerIntegrationTest {
         assertTrue(store.image(restored.pages.first()).isFile)
         image.delete()
     }
+    @Test fun documentImportRecognizesTamilPhotoAndScannedPdf() = kotlinx.coroutines.runBlocking {
+        val image = sample(true)
+        val store = ScanDraftStore(context)
+        val draft = store.importPages(listOf(Uri.fromFile(image))).copy(searchable = false, quality = ExportQuality.HIGH)
+        val pdf = ScanPdfExporter(context).export(draft, store, AtomicBoolean(false)) {}.first
+        val documents = com.aidocmate.app.DocumentStore(context)
+        try {
+            for (file in listOf(image, pdf)) {
+                val imported = documents.import(Uri.fromFile(file), "tam")
+                try {
+                    assertTrue("Tamil missing after importing ${file.extension}", imported.pages.any { page -> page.text.any { it in '\u0B80'..'\u0BFF' } })
+                } finally { documents.delete(imported) }
+            }
+        } finally { image.delete(); pdf.parentFile?.deleteRecursively() }
+    }
     @Test fun searchableEnglishPdfContainsRecognisedText() { verifySearchable(false) }
     @Test fun searchableTamilPdfContainsTamilUnicode() { verifySearchable(true) }
     private fun verifySearchable(tamil: Boolean) {

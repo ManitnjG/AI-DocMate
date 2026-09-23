@@ -29,12 +29,18 @@ class DocumentStore(private val context: Context) {
         SavedDoc(o.getString("id"), o.getString("name"), (0 until a.length()).map { i -> a.getJSONObject(i).let { p -> DocPage(p.getInt("number"), p.getString("text")) } }, o.optString("result"), o.optBoolean("favorite", false), o.optJSONArray("tags")?.let { tags -> (0 until tags.length()).map { i -> tags.getString(i) } } ?: emptyList())
     }.getOrNull() } ?: emptyList()
 
-    fun save(d: SavedDoc) {
+    companion object { private val lock = Any() }
+    fun get(id: String): SavedDoc? = synchronized(lock) { list().firstOrNull { it.id == id } }
+    fun updateResult(id: String, result: String): Boolean = synchronized(lock) {
+        val current = get(id) ?: return@synchronized false
+        save(current.copy(result = result)); true
+    }
+    fun save(d: SavedDoc) = synchronized(lock) {
         val o = JSONObject().put("id", d.id).put("name", d.name).put("result", d.result).put("favorite", d.favorite).put("tags", JSONArray(d.tags)).put("pages", pagesJson(d.pages))
         val temp = File(dir, d.id + ".tmp"); temp.writeText(o.toString())
         check(temp.renameTo(File(dir, d.id + ".json"))) { "Could not save document" }
     }
-    fun delete(d: SavedDoc) { check(File(dir, d.id + ".json").delete()) { "Could not delete document" } }
+    fun delete(d: SavedDoc) = synchronized(lock) { check(File(dir, d.id + ".json").delete()) { "Could not delete document" } }
 
     private fun xmlText(xml: String): String = xml
         .replace(Regex("</(?:w:p|a:p)>", RegexOption.IGNORE_CASE), "\n")
@@ -70,7 +76,7 @@ class DocumentStore(private val context: Context) {
         }
     }
 
-    suspend fun import(uri: Uri): SavedDoc = withContext(Dispatchers.IO) {
+    suspend fun import(uri: Uri, ocrLanguage: String = "eng", documentId: String = UUID.randomUUID().toString()): SavedDoc = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
         val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: "Document"
         val extension = name.substringAfterLast('.', "").lowercase()
@@ -81,14 +87,31 @@ class DocumentStore(private val context: Context) {
                 while (true) { val n = input.read(buffer); if (n < 0) break; total += n
                     require(total <= 25 * 1024 * 1024) { "Choose a file smaller than 25 MB" }; out.write(buffer, 0, n) }
             } } ?: error("Cannot open this file")
+            val header = ByteArray(5)
+            tmp.inputStream().use { it.read(header) }
+            val isPdf = String(header, Charsets.US_ASCII) == "%PDF-"
+            require(ocrLanguage in com.aidocmate.app.scan.OcrLanguages.names) { "Unsupported OCR language" }
             val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+            var tess: com.googlecode.tesseract.android.TessBaseAPI? = null
+            suspend fun recognize(bitmap: android.graphics.Bitmap): String {
+                if (ocrLanguage == "eng") return recognizer.process(InputImage.fromBitmap(bitmap, 0)).await().text
+                val engine = tess ?: com.googlecode.tesseract.android.TessBaseAPI().also { api ->
+                    tess = api
+                    val models = com.aidocmate.app.scan.OcrModels(context)
+                    check(models.ready(ocrLanguage)) { "Download the selected OCR language pack first" }
+                    check(api.init(models.root.path, com.aidocmate.app.scan.OcrLanguages.codes(ocrLanguage).joinToString("+"), com.googlecode.tesseract.android.TessBaseAPI.OEM_LSTM_ONLY)) { "Cannot start OCR" }
+                    api.setPageSegMode(com.googlecode.tesseract.android.TessBaseAPI.PageSegMode.PSM_AUTO)
+                }
+                engine.setImage(bitmap)
+                return engine.getUTF8Text() ?: ""
+            }
             val pages = try {
                 when {
                     extension == "txt" -> listOf(DocPage(1, tmp.readText()))
                     extension == "docx" || extension == "pptx" -> officePages(tmp, extension)
-                    resolver.getType(uri) == "application/pdf" || extension == "pdf" -> {
+                    isPdf || resolver.getType(uri) == "application/pdf" || extension == "pdf" -> {
                         val extracted = PDDocument.load(tmp).use { pdf ->
-                            require(pdf.numberOfPages <= 100) { "Choose a PDF with at most 100 pages" }
+                            require(pdf.numberOfPages in 1..100) { "Choose a PDF with at most 100 pages" }
                             (1..pdf.numberOfPages).map { n -> val stripper = PDFTextStripper(); stripper.startPage = n; stripper.endPage = n; DocPage(n, stripper.getText(pdf)) }
                         }
                         if (extracted.any { it.text.isBlank() }) {
@@ -97,7 +120,7 @@ class DocumentStore(private val context: Context) {
                                     if (p.text.isNotBlank()) p else renderer.openPage(p.number - 1).use { page ->
                                         val scale = minOf(2f, 1800f / maxOf(page.width, page.height))
                                         val bitmap = android.graphics.Bitmap.createBitmap((page.width * scale).toInt().coerceAtLeast(1), (page.height * scale).toInt().coerceAtLeast(1), android.graphics.Bitmap.Config.ARGB_8888)
-                                        try { bitmap.eraseColor(android.graphics.Color.WHITE); page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY); DocPage(p.number, recognizer.process(InputImage.fromBitmap(bitmap, 0)).await().text) } finally { bitmap.recycle() }
+                                        try { bitmap.eraseColor(android.graphics.Color.WHITE); page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY); DocPage(p.number, recognize(bitmap)) } finally { bitmap.recycle() }
                                     }
                                 } }
                             }
@@ -109,13 +132,13 @@ class DocumentStore(private val context: Context) {
                         var sample = 1
                         while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 2400) sample *= 2
                         val bitmap = android.graphics.BitmapFactory.decodeFile(tmp.path, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }) ?: error("Unsupported file. Choose PDF, DOCX, PPTX, TXT, JPG or PNG.")
-                        try { listOf(DocPage(1, recognizer.process(InputImage.fromBitmap(bitmap, 0)).await().text)) } finally { bitmap.recycle() }
+                        try { listOf(DocPage(1, recognize(bitmap))) } finally { bitmap.recycle() }
                     }
                 }
-            } finally { recognizer.close() }
-            require(pages.any { it.text.isNotBlank() }) { "No text detected. Built-in scan OCR currently supports Latin text." }
+            } finally { recognizer.close(); tess?.recycle() }
+            require(pages.any { it.text.isNotBlank() }) { "No text detected. Try a clearer scan or select the correct OCR language." }
             require(pages.sumOf { it.text.length } <= 1_000_000) { "Document text is too large" }
-            SavedDoc(UUID.randomUUID().toString(), name, pages).also { save(it) }
+            SavedDoc(documentId, name, pages).also { save(it) }
         } finally { tmp.delete() }
     }
 }

@@ -2,210 +2,192 @@ package com.aidocmate.app
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.pdf.PdfRenderer
 import android.net.Uri
-import android.os.ParcelFileDescriptor
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
-import com.tom_roush.pdfbox.pdmodel.PDDocument
-import com.tom_roush.pdfbox.pdmodel.PDPage
-import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
-import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
-import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
+import androidx.lifecycle.ViewModelProvider
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.min
 
-private fun loadEditorSource(context: Context, uri: Uri): File {
-    val raw = File.createTempFile("editor-input", ".bin", context.cacheDir)
-    val pdfFile = File.createTempFile("editor-source", ".pdf", context.cacheDir)
-    try {
-        context.contentResolver.openInputStream(uri)?.use { input -> raw.outputStream().use { out ->
-            val buffer = ByteArray(8192); var total = 0
-            while (true) { val n = input.read(buffer); if (n < 0) break; total += n
-                require(total <= 25 * 1024 * 1024) { "Maximum file size is 25 MB" }; out.write(buffer, 0, n) }
-        } } ?: error("Cannot read file")
-        val header = ByteArray(5); raw.inputStream().use { it.read(header) }
-        if (String(header, Charsets.US_ASCII) == "%PDF-") {
-            PDDocument.load(raw).use { require(it.numberOfPages in 1..100) { "Choose 1–100 pages" }; require(!it.isEncrypted) { "Unlock the PDF before editing" } }
-            raw.copyTo(pdfFile, overwrite = true)
-        } else {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }; BitmapFactory.decodeFile(raw.path, bounds)
-            require(bounds.outWidth > 0 && bounds.outHeight > 0) { "Choose PDF, JPG or PNG" }
-            var sample = 1; while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 2400) sample *= 2
-            val bitmap = BitmapFactory.decodeFile(raw.path, BitmapFactory.Options().apply { inSampleSize = sample }) ?: error("Cannot decode image")
-            try { PDDocument().use { pdf ->
-                val page = PDPage(PDRectangle(bitmap.width.toFloat(), bitmap.height.toFloat())); pdf.addPage(page)
-                PDPageContentStream(pdf, page).use { it.drawImage(LosslessFactory.createFromImage(pdf, bitmap), 0f, 0f, page.mediaBox.width, page.mediaBox.height) }; pdf.save(pdfFile)
-            } } finally { bitmap.recycle() }
+@Composable fun SmartEditor(context:Context,onBack:()->Unit) {
+    val activity=context as ComponentActivity
+    val vm=remember { ViewModelProvider(activity)[EditorViewModel::class.java] }
+    var scannerOpen by rememberSaveable { mutableStateOf(false) }
+    if(scannerOpen) { com.aidocmate.app.scan.ScannerScreen(activity) { scannerOpen=false }; return }
+    val draft=vm.draft; val selected=draft?.selected ?: 0; val page=draft?.edits?.pages?.getOrNull(selected)
+    var preview by remember { mutableStateOf<Bitmap?>(null) }
+    var zoom by remember { mutableFloatStateOf(1f) }; var pan by remember { mutableStateOf(Offset.Zero) }
+    var tool by rememberSaveable { mutableStateOf("pan") }
+    var editing by remember { mutableStateOf<EditorMark?>(null) }
+    var live by remember { mutableStateOf<List<EditorPoint>>(emptyList()) }
+    var language by rememberSaveable { mutableStateOf("eng") }; var languageDialog by remember { mutableStateOf(false) }
+    var discard by remember { mutableStateOf(false) }
+    var range by rememberSaveable { mutableStateOf("") }; var rangeDialog by remember { mutableStateOf(false) }; var rangeError by remember { mutableStateOf<String?>(null) }
+    var cameraPath by rememberSaveable { mutableStateOf("") }
+    val picker=rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> if(uris.isNotEmpty()) vm.open(uris) }
+    val camera=rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        if(ok && cameraPath.isNotBlank()) vm.open(listOf(Uri.fromFile(File(cameraPath))))
+        else if(cameraPath.isNotBlank()) File(cameraPath).delete()
+        cameraPath=""
+    }
+    fun capture() {
+        try {
+            val dir=File(context.cacheDir,"camera").apply { mkdirs() }
+            val file=File.createTempFile("editor-camera",".jpg",dir); cameraPath=file.path
+            camera.launch(androidx.core.content.FileProvider.getUriForFile(context,context.packageName+".fileprovider",file))
+        } catch(e:Exception) { vm.status("Cannot open camera: ${e.message}") }
+    }
+    val permission=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { if(it) capture() else vm.status("Camera permission denied. You can import a photo.") }
+    val exporter=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+        if(uri!=null && vm.draft!=null) try { vm.export(uri,PageRanges.parse(range,vm.draft!!.edits.pages.size)) } catch(e:Exception) { vm.status(e.message ?: "Invalid pages") }
+    }
+    BackHandler { onBack() }
+    LaunchedEffect(draft?.source,selected,vm.revision) {
+        val current=vm.draft
+        zoom=1f; pan=Offset.Zero; live=emptyList()
+        if(current==null) { preview=null; return@LaunchedEffect }
+        try { preview=withContext(Dispatchers.IO) { EditorRenderer.render(current.source,current.edits.pages[current.selected]) } }
+        catch(e:Exception) { vm.status("Preview failed: ${e.message}"); preview=null }
+    }
+    if(discard) AlertDialog(onDismissRequest={discard=false},title={Text("Discard saved editor draft?")},text={Text("This removes the editable draft. Your originals and exported PDFs stay unchanged.")},
+        confirmButton={TextButton(onClick={discard=false;vm.discard()}){Text("Discard draft")}},dismissButton={TextButton(onClick={discard=false}){Text("Keep draft")}})
+    if(rangeDialog) AlertDialog(onDismissRequest={rangeDialog=false},title={Text("Export PDF pages")},text={Column {
+        OutlinedTextField(range,{range=it.take(1000);rangeError=null},label={Text("Pages, e.g. 1-3, 5")},isError=rangeError!=null)
+        Text("Edited pages are flattened for consistent appearance. Their text will not be searchable until OCR is run again.",style=MaterialTheme.typography.bodySmall)
+        rangeError?.let { Text(it,color=MaterialTheme.colorScheme.error) }
+    }},confirmButton={TextButton(onClick={try { PageRanges.parse(range,draft?.edits?.pages?.size ?: 0);rangeDialog=false;exporter.launch("DocMate-edited.pdf") } catch(e:Exception){rangeError=e.message}}){Text("Export")}},dismissButton={TextButton(onClick={rangeDialog=false}){Text("Cancel")}})
+    if(languageDialog) AlertDialog(onDismissRequest={languageDialog=false},title={Text("OCR language")},text={Column(Modifier.heightIn(max=360.dp).verticalScroll(rememberScrollState())) {
+        com.aidocmate.app.scan.OcrLanguages.names.forEach { (code,name) -> TextButton(onClick={language=code}) { Text((if(code==language) "✓ " else "")+name) } }
+    }},confirmButton={TextButton(onClick={languageDialog=false;vm.download(language)}) { Text("Download packs") }},dismissButton={TextButton(onClick={languageDialog=false}) { Text("Done") }})
+    editing?.let { mark -> EditorMarkDialog(mark,{editing=null},{updated->editing=null;vm.change { it.putMark(selected,updated) }},{editing=null;vm.change { it.removeMark(selected,mark.id) }}) }
+    Column(Modifier.fillMaxSize().safeDrawingPadding().padding(12.dp),verticalArrangement=Arrangement.spacedBy(5.dp)) {
+        Row(verticalAlignment=Alignment.CenterVertically) {
+            TextButton(onClick=onBack){Text("Back")}; Text("Smart Editor",style=MaterialTheme.typography.titleLarge)
         }
-        return pdfFile
-    } catch (e: Exception) { pdfFile.delete(); throw e } finally { raw.delete() }
+        Row(Modifier.horizontalScroll(rememberScrollState())) {
+            TextButton(onClick={picker.launch(arrayOf("application/pdf","image/jpeg","image/png"))},enabled=!vm.busy && draft==null){Text("Open / merge")}
+            TextButton(onClick={scannerOpen=true},enabled=!vm.busy && draft==null){Text("Document scanner")}
+            TextButton(onClick={permission.launch(android.Manifest.permission.CAMERA)},enabled=!vm.busy && draft==null){Text("Capture photo")}
+            if(draft!=null) {
+                TextButton(onClick={range="1-${draft.edits.pages.size}";rangeDialog=true},enabled=!vm.busy){Text("Export PDF")}
+                TextButton(onClick={discard=true},enabled=!vm.busy){Text("New / discard")}
+            }
+        }
+        Text(vm.message,style=MaterialTheme.typography.bodySmall,maxLines=3)
+        if(vm.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if(draft!=null) {
+            Text("Draft saves automatically, including when you leave the editor.",style=MaterialTheme.typography.labelSmall)
+            Row(Modifier.horizontalScroll(rememberScrollState())) {
+                listOf("pan" to "Pan / zoom","select" to "Select","text" to "Add text","ink" to "Signature / pen","highlight" to "Highlight","rectangle" to "Box").forEach { (key,label) ->
+                    FilterChip(selected=tool==key,onClick={tool=key},label={Text(label)},enabled=!vm.busy)
+                }
+                TextButton(onClick={languageDialog=true},enabled=!vm.busy){Text("Language: $language")}
+                TextButton(onClick={tool="select";vm.recognize(language)},enabled=!vm.busy){Text("Edit existing text (OCR)")}
+            }
+        }
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().clipToBounds(),contentAlignment=Alignment.Center) {
+            val bitmap=preview
+            if(bitmap!=null && page!=null) {
+                val rotated=page.rotation%180!=0
+                val factor=min(maxWidth.value/(if(rotated) bitmap.height else bitmap.width),maxHeight.value/(if(rotated) bitmap.width else bitmap.height))
+                Box(Modifier.requiredSize((bitmap.width*factor).dp,(bitmap.height*factor).dp).graphicsLayer {
+                    scaleX=zoom;scaleY=zoom;translationX=pan.x;translationY=pan.y;rotationZ=page.rotation.toFloat()
+                }.pointerInput(tool,selected,vm.revision,vm.busy) {
+                    fun point(offset:Offset)=EditorPoint((offset.x/size.width).coerceIn(0f,1f),(offset.y/size.height).coerceIn(0f,1f))
+                    if(vm.busy) return@pointerInput
+                    when(tool) {
+                        "pan" -> detectTransformGestures { _,delta,scale,_ -> zoom=(zoom*scale).coerceIn(1f,5f);pan+=delta }
+                        "text","select" -> detectTapGestures { position ->
+                            val p=point(position)
+                            if(tool=="text") editing=EditorMark(left=p.x.coerceAtMost(.9f),top=p.y.coerceAtMost(.9f),right=(p.x+.5f).coerceAtMost(1f),bottom=(p.y+.1f).coerceAtMost(1f))
+                            else {
+                                editing=(page.marks.asReversed()+vm.ocr.map { it.mark }).firstOrNull { p.x in it.left..it.right && p.y in it.top..it.bottom }
+                                if(editing==null) vm.status("Tap an annotation or run OCR, then tap a detected text box.")
+                            }
+                        }
+                        else -> detectDragGestures(onDragStart={live=listOf(point(it))},onDragCancel={live=emptyList()},onDragEnd={
+                            val points=live;live=emptyList()
+                            if(points.size>=2) {
+                                val a=points.first();val b=points.last()
+                                val l=if(tool=="ink") points.minOf{it.x} else minOf(a.x,b.x)
+                                val t=if(tool=="ink") points.minOf{it.y} else minOf(a.y,b.y)
+                                val r=if(tool=="ink") points.maxOf{it.x} else maxOf(a.x,b.x)
+                                val bottom=if(tool=="ink") points.maxOf{it.y} else maxOf(a.y,b.y)
+                                vm.change { it.putMark(selected,EditorMark(kind=tool,left=l,top=t,right=r,bottom=bottom,size=.003f,color=if(tool=="highlight") 0xFFFFCC00.toInt() else 0xFF111111.toInt(),points=if(tool=="ink") points else emptyList())) }
+                            }
+                        }) { change,_ -> change.consume();if(live.size<3000) live=live+point(change.position) }
+                    }
+                }) {
+                    Image(bitmap.asImageBitmap(),"Page ${selected+1}",Modifier.fillMaxSize())
+                    Canvas(Modifier.fillMaxSize()) {
+                        vm.ocr.forEach { line -> val m=line.mark;drawRect(Color(0xFF2563EB),Offset(m.left*size.width,m.top*size.height),Size((m.right-m.left)*size.width,(m.bottom-m.top)*size.height),style=Stroke(2f)) }
+                        live.zipWithNext().forEach { (a,b)->drawLine(Color.Black,Offset(a.x*size.width,a.y*size.height),Offset(b.x*size.width,b.y*size.height),3f) }
+                    }
+                }
+            }
+        }
+        if(draft!=null) {
+            Row(Modifier.horizontalScroll(rememberScrollState()),verticalAlignment=Alignment.CenterVertically) {
+                TextButton(onClick={vm.select(selected-1)},enabled=selected>0 && !vm.busy){Text("Previous")};Text("${selected+1} / ${draft.edits.pages.size}")
+                TextButton(onClick={vm.select(selected+1)},enabled=selected<draft.edits.pages.lastIndex && !vm.busy){Text("Next")}
+                TextButton(onClick={vm.change{it.undo()}},enabled=draft.edits.canUndo && !vm.busy){Text("Undo")}
+                TextButton(onClick={vm.change{it.redo()}},enabled=draft.edits.canRedo && !vm.busy){Text("Redo")}
+            }
+            Row(Modifier.horizontalScroll(rememberScrollState())) {
+                TextButton(onClick={vm.change{it.rotate(selected)}},enabled=!vm.busy){Text("Rotate")}
+                TextButton(onClick={vm.change{it.duplicate(selected)}},enabled=!vm.busy && draft.edits.pages.size<100){Text("Duplicate")}
+                TextButton(onClick={vm.change{it.insertBlank(selected)}},enabled=!vm.busy && draft.edits.pages.size<100){Text("Blank page")}
+                TextButton(onClick={vm.change{it.delete(selected)}},enabled=!vm.busy && draft.edits.pages.size>1){Text("Delete page")}
+                TextButton(onClick={vm.change{it.move(selected,selected-1)}},enabled=!vm.busy && selected>0){Text("Move earlier")}
+                TextButton(onClick={vm.change{it.move(selected,selected+1)}},enabled=!vm.busy && selected<draft.edits.pages.lastIndex){Text("Move later")}
+            }
+        }
+    }
 }
 
-@Composable fun SmartEditor(context: Context, onBack: () -> Unit) {
-    var scannerOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-    if (scannerOpen) { com.aidocmate.app.scan.ScannerScreen(context as androidx.activity.ComponentActivity) { scannerOpen = false }; return }
-    val scope = rememberCoroutineScope()
-    var source by remember { mutableStateOf<File?>(null) }
-    var edits by remember { mutableStateOf<PageEdits?>(null) }
-    var revision by remember { mutableIntStateOf(0) }
-    var selected by remember { mutableIntStateOf(0) }
-    var busy by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf("Open a PDF or image. Export saves a separate PDF; the original stays unchanged.") }
-    var preview by remember { mutableStateOf<Bitmap?>(null) }
-    var zoom by remember { mutableFloatStateOf(1f) }
-    var panX by remember { mutableFloatStateOf(0f) }; var panY by remember { mutableFloatStateOf(0f) }
-    var confirmClose by remember { mutableStateOf(false) }
-    fun requestClose() { if (source == null) onBack() else confirmClose = true }
-    BackHandler { if (!busy) requestClose() }
-    if (confirmClose) AlertDialog(
-        onDismissRequest = { confirmClose = false },
-        title = { Text("Close editor?") },
-        text = { Text("Export your PDF before closing. Unsaved changes will be discarded; original files stay unchanged.") },
-        confirmButton = { TextButton(onClick = onBack) { Text("Close editor") } },
-        dismissButton = { TextButton(onClick = { confirmClose = false }) { Text("Keep editing") } }
-    )
-    DisposableEffect(Unit) { onDispose { source?.delete() } }
-    var exportOnlyPage by remember { mutableStateOf(false) }
-    var cameraFile by remember { mutableStateOf<File?>(null) }
-    DisposableEffect(Unit) { onDispose { cameraFile?.delete() } }
-    fun openSource(uri: Uri) {
-        busy = true
-        scope.launch {
-            var loaded: File? = null
-            try {
-                loaded = withContext(Dispatchers.IO) { loadEditorSource(context, uri) }
-                val count = withContext(Dispatchers.IO) { PDDocument.load(loaded).use { it.numberOfPages } }
-                source?.delete(); source = loaded; loaded = null
-                edits = PageEdits(count); selected = 0; revision++
-                message = "Offline • pinch to zoom and drag to pan"
-            } catch (e: Exception) { message = "Open failed: ${e.message}" }
-            finally { loaded?.delete(); cameraFile?.delete(); cameraFile = null; busy = false }
+@Composable private fun EditorMarkDialog(initial:EditorMark,onDismiss:()->Unit,onSave:(EditorMark)->Unit,onDelete:()->Unit) {
+    var value by remember(initial.id) { mutableStateOf(initial) }
+    AlertDialog(onDismissRequest=onDismiss,title={Text(if(value.kind=="replace") "Replace recognised text" else "Edit annotation")},text={Column(Modifier.heightIn(max=440.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+        if(value.kind in listOf("text","replace")) {
+            OutlinedTextField(value.text,{value=value.copy(text=it.take(4000))},label={Text("Text")},modifier=Modifier.fillMaxWidth())
+            Text("Font size");Slider(value.size,{value=value.copy(size=it)},valueRange=.005f..0.1f)
+            Row(Modifier.horizontalScroll(rememberScrollState())) { listOf("sans-serif","serif","monospace","cursive").forEach { name->FilterChip(selected=value.family==name,onClick={value=value.copy(family=name,fontKey="")},label={Text(name)}) } }
+            Row { FilterChip(selected=value.bold,onClick={value=value.copy(bold=!value.bold)},label={Text("Bold")});FilterChip(selected=value.italic,onClick={value=value.copy(italic=!value.italic)},label={Text("Italic")}) }
         }
-    }
-    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        val file = cameraFile
-        if (ok && file != null) openSource(Uri.fromFile(file))
-        else { file?.delete(); cameraFile = null; message = "Capture cancelled." }
-    }
-    fun launchCamera() {
-        try {
-            val dir = File(context.cacheDir, "camera").apply { mkdirs() }
-            val file = File.createTempFile("capture", ".jpg", dir); cameraFile = file
-            camera.launch(androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file))
-        } catch (e: Exception) { cameraFile?.delete(); cameraFile = null; message = "Camera unavailable: ${e.message}" }
-    }
-    val cameraPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed ->
-        if (allowed) launchCamera() else message = "Camera permission denied. You can still import a photo."
-    }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) openSource(uri)
-    }
-
-    val merger = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isNotEmpty()) {
-            busy = true
-            scope.launch {
-                val inputs = mutableListOf<File>()
-                var merged: File? = null
-                try {
-                    require(uris.size <= 20) { "Select at most 20 documents" }
-                    val result = withContext(Dispatchers.IO) {
-                        val output = File.createTempFile("editor-merged", ".pdf", context.cacheDir)
-                        merged = output
-                        PDDocument().use { target ->
-                            val utility = com.tom_roush.pdfbox.multipdf.PDFMergerUtility()
-                            var totalBytes = 0L
-                            for (uri in uris) {
-                                val input = loadEditorSource(context, uri); inputs.add(input)
-                                totalBytes += input.length()
-                                require(totalBytes <= 100L * 1024 * 1024) { "Combined files exceed 100 MB" }
-                                PDDocument.load(input).use { document ->
-                                    require(target.numberOfPages + document.numberOfPages <= 100) { "Combined document exceeds 100 pages" }
-                                    utility.appendDocument(target, document)
-                                }
-                            }
-                            target.save(output)
-                            output to target.numberOfPages
-                        }
-                    }
-                    source?.delete(); source = result.first; merged = null
-                    edits = PageEdits(result.second); selected = 0; revision++
-                    message = "Combined ${uris.size} documents. Review page order, then export PDF."
-                } catch (e: Exception) { message = "Merge failed: ${e.message}" }
-                finally { inputs.forEach { it.delete() }; merged?.delete(); busy = false }
-            }
+        Text("Colour")
+        Row(Modifier.horizontalScroll(rememberScrollState())) { listOf("Black" to 0xFF111111.toInt(),"Blue" to 0xFF1749C9.toInt(),"Red" to 0xFFC52222.toInt(),"Yellow" to 0xFFFFCC00.toInt()).forEach { (name,color)->TextButton(onClick={value=value.copy(color=color)}){Text(name)} } }
+        if(value.kind=="replace") { Text(if(value.fontKey.isNotEmpty()) "Embedded font available. New characters may fall back if missing from that font. Review the background." else "Font and background are estimates. Complex backgrounds may need manual retouching.",style=MaterialTheme.typography.bodySmall);TextButton(onClick={value=value.copy(background=0xFFFFFFFF.toInt())}){Text("Use white background") } }
+        if(value.kind!="ink") {
+            Text("Horizontal position");Slider(value.left,{x->val width=value.right-value.left;value=value.copy(left=x,right=(x+width).coerceAtMost(1f))},valueRange=0f..0.9f)
+            Text("Vertical position");Slider(value.top,{y->val height=value.bottom-value.top;value=value.copy(top=y,bottom=(y+height).coerceAtMost(1f))},valueRange=0f..0.9f)
+            Text("Box width");Slider((value.right-value.left).coerceAtLeast(.01f),{value=value.copy(right=(value.left+it).coerceAtMost(1f))},valueRange=.01f..1f)
+            Text("Box height");Slider((value.bottom-value.top).coerceAtLeast(.01f),{value=value.copy(bottom=(value.top+it).coerceAtMost(1f))},valueRange=.01f..1f)
         }
-    }
-    val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
-        val file = source; val pages = edits?.pages?.let { if (exportOnlyPage) listOf(it[selected]) else it.toList() }
-        if (uri != null && file != null && pages != null) { busy = true; scope.launch {
-            try { withContext(Dispatchers.IO) {
-                PDDocument.load(file).use { original -> PDDocument().use { result ->
-                    pages.forEach { spec -> val imported = if (spec.source < 0) PDPage(PDRectangle.A4).also { result.addPage(it) } else result.importPage(original.getPage(spec.source)).apply { resources = original.getPage(spec.source).resources; cropBox = original.getPage(spec.source).cropBox; mediaBox = original.getPage(spec.source).mediaBox }; imported.rotation = (imported.rotation + spec.rotation) % 360 }
-                    context.contentResolver.openOutputStream(uri)?.use { result.save(it) } ?: error("Cannot write destination")
-                } }
-            }; message = "PDF exported successfully." } catch (e: Exception) { message = "Export failed: ${e.message}. Choose a new destination and retry." } finally { busy = false }
-        } }
-    }
-    LaunchedEffect(source, selected, revision) {
-        val file = source ?: return@LaunchedEffect
-        val pageSpec = edits?.pages?.getOrNull(selected) ?: return@LaunchedEffect
-        zoom = 1f; panX = 0f; panY = 0f
-        try { preview = withContext(Dispatchers.IO) {
-            if (pageSpec.source < 0) Bitmap.createBitmap(990, 1400, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.WHITE) } else ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd -> PdfRenderer(fd).use { renderer -> renderer.openPage(pageSpec.source).use { page ->
-                val scale = 1400f / maxOf(page.width, page.height)
-                Bitmap.createBitmap((page.width * scale).toInt().coerceAtLeast(1), (page.height * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888).also { bitmap -> bitmap.eraseColor(android.graphics.Color.WHITE); page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY) }
-            } } }
-        } } catch (e: Exception) { preview = null; message = "Preview failed: ${e.message}" }
-    }
-    fun edit(action: (PageEdits) -> Unit) { try { edits?.let(action); selected = selected.coerceAtMost((edits?.pages?.size ?: 1) - 1); revision++ } catch (e: Exception) { message = e.message ?: "Cannot edit page" } }
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row { TextButton(onClick = { requestClose() }, enabled = !busy) { Text("Back") }; Text("Smart Editor", style = MaterialTheme.typography.headlineSmall) }
-        Row { Button(onClick = { picker.launch(arrayOf("application/pdf", "image/jpeg", "image/png")) }, enabled = !busy && source == null) { Text("Open") }
-            TextButton(onClick = { exportOnlyPage = false; exporter.launch("DocMate-edited.pdf") }, enabled = source != null && !busy) { Text("Export PDF") } }
-        Row(Modifier.horizontalScroll(rememberScrollState())) {
-            TextButton(onClick = { scannerOpen = true }, enabled = !busy && source == null) { Text("Document scanner") }
-            TextButton(onClick = { cameraPermission.launch(android.Manifest.permission.CAMERA) }, enabled = !busy && source == null) { Text("Capture photo") }
-            TextButton(onClick = { merger.launch(arrayOf("application/pdf", "image/jpeg", "image/png")) }, enabled = !busy && source == null) { Text("Merge PDFs / photos") }
-        }
-        Text(message, style = MaterialTheme.typography.bodySmall)
-        if (source != null) Text("Export before closing or rotating your device.", style = MaterialTheme.typography.labelSmall)
-        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-        Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().pointerInput(source, selected) { detectTransformGestures { _, pan, scale, _ -> zoom = (zoom * scale).coerceIn(1f, 5f); panX = (panX + pan.x).coerceIn(-2000f, 2000f); panY = (panY + pan.y).coerceIn(-2000f, 2000f) } }) {
-            preview?.let { bitmap -> Image(bitmap.asImageBitmap(), "Page ${selected + 1}", Modifier.fillMaxSize().graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = panX; translationY = panY; rotationZ = (edits?.pages?.getOrNull(selected)?.rotation ?: 0).toFloat() }) }
-        }
-        val model = edits
-        if (model != null) {
-            Row { TextButton(onClick = { selected-- }, enabled = selected > 0 && !busy) { Text("Previous") }; Text("${selected + 1} / ${model.pages.size}"); TextButton(onClick = { selected++ }, enabled = selected < model.pages.lastIndex && !busy) { Text("Next") } }
-            Row(Modifier.horizontalScroll(rememberScrollState())) {
-                TextButton(onClick = { edit { it.undo() } }, enabled = model.canUndo && !busy) { Text("Undo") }
-                TextButton(onClick = { edit { it.redo() } }, enabled = model.canRedo && !busy) { Text("Redo") }
-                TextButton(onClick = { exportOnlyPage = true; exporter.launch("DocMate-page-${selected + 1}.pdf") }, enabled = !busy) { Text("Extract page") }
-                TextButton(onClick = { edit { it.insertBlank(selected) } }, enabled = !busy && model.pages.size < 100) { Text("Blank page") }
-                TextButton(onClick = { edit { it.rotate(selected) } }, enabled = !busy) { Text("Rotate") }
-                TextButton(onClick = { edit { it.duplicate(selected) } }, enabled = !busy && model.pages.size < 100) { Text("Duplicate") }
-                TextButton(onClick = { edit { it.delete(selected) } }, enabled = !busy && model.pages.size > 1) { Text("Delete") }
-                TextButton(onClick = { edit { it.move(selected, selected - 1) }; if (selected > 0) selected-- }, enabled = !busy && selected > 0) { Text("Move earlier") }
-                TextButton(onClick = { edit { it.move(selected, selected + 1) }; if (selected < model.pages.lastIndex) selected++ }, enabled = !busy && selected < model.pages.lastIndex) { Text("Move later") }
-            }
-        }
-    }
+        TextButton(onClick=onDelete){Text("Delete annotation")}
+    }},confirmButton={TextButton(onClick={onSave(value)}){Text("Apply")}},dismissButton={TextButton(onClick=onDismiss){Text("Cancel")}})
 }

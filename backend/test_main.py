@@ -38,6 +38,46 @@ class ApiTests(unittest.TestCase):
     def test_long_summary_explicit_error(self):
         self.payload.update(mode='summary', pages=[{'number': 1, 'text': 'abc ' * 15000}])
         self.assertEqual(self.client.post('/ask', json=self.payload, headers=self.headers).status_code, 422)
+    def test_provider_deadline_returns_excerpts(self):
+        import asyncio
+        async def slow(*args):
+            await asyncio.sleep(1)
+            return 'Late answer [p.1]', 'openrouter'
+        with patch('main.complete', new=slow), patch('main.AI_DEADLINE_SECONDS', 0.01):
+            response = self.client.post('/ask', json=self.payload, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['provider'], 'extractive')
+        self.assertEqual(response.json()['sources'][0]['page'], 1)
+
+    def test_followup_retrieves_evidence_from_previous_question(self):
+        self.payload.update(question='What about it?', history=[{'question':'When is payment due?', 'answer':'10 October [p.1]'}])
+        with patch('main.complete', new=AsyncMock(return_value=('The payment is due on 10 October [p.1]', 'openrouter'))) as provider:
+            result=self.client.post('/ask',json=self.payload,headers=self.headers)
+        self.assertEqual(result.status_code,200)
+        self.assertEqual(result.json()['sources'][0]['page'],1)
+        self.assertIn('CURRENT question',provider.call_args.args[1])
+
+    def test_conversation_history_is_bounded(self):
+        self.payload['history']=[{'question':'Q','answer':'A'}]*5
+        self.assertEqual(self.client.post('/ask',json=self.payload,headers=self.headers).status_code,422)
+
+    def test_fast_provider_wins_and_slow_provider_is_cancelled(self):
+        import asyncio
+        from main import complete
+        cancelled=[]
+        async def provider(context,question,language,name,*args):
+            if name=='groq':
+                return 'Payment is due [p.1]'
+            try:
+                await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                cancelled.append(name)
+                raise
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'test','GROQ_API_KEY':'test'}), patch('main.complete_with_provider',new=provider):
+            result=asyncio.run(complete('[p.1] Payment due tomorrow','When?','English'))
+        self.assertEqual(result[1],'groq')
+        self.assertIn('openrouter',cancelled)
+
     def test_rate_limit(self):
         self.payload['question'] = 'bananas'
         for _ in range(10):
