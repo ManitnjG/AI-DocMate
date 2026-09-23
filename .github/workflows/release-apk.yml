@@ -9,36 +9,48 @@ on:
 permissions:
   contents: write
 jobs:
-  checks:
-    uses: ./.github/workflows/android.yml
   release:
-    needs: checks
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/setup-java@v4
         with:
-          name: AI-DocMate-debug-apk
-          path: verified-apk
-      - name: Package verified APK
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          log-accepted-android-sdk-licenses: false
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Test and build release APK
+        run: gradle testDebugUnitTest lintDebug assembleRelease
+        env:
+          DOCMATE_API_URL: ${{ vars.DOCMATE_API_URL }}
+      - name: Create temporary release signing key
         run: |
-          cp verified-apk/app-debug.apk AI-DocMate-v0.8.0.apk
-          sha256sum AI-DocMate-v0.8.0.apk > AI-DocMate-v0.8.0.apk.sha256
+          keytool -genkeypair -v -keystore "$RUNNER_TEMP/release.jks" -storepass docmate081 -keypass docmate081 -alias docmate -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=AI DocMate, OU=Android, O=AI DocMate, L=Chennai, ST=Tamil Nadu, C=IN"
+      - name: Align and sign APK
+        run: |
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f -p 4 app/build/outputs/apk/release/app-release-unsigned.apk AI-DocMate-v0.8.1-aligned.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias docmate --ks-pass pass:docmate081 --key-pass pass:docmate081 --out AI-DocMate-v0.8.1.apk AI-DocMate-v0.8.1-aligned.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs AI-DocMate-v0.8.1.apk
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging AI-DocMate-v0.8.1.apk | head -20
+          sha256sum AI-DocMate-v0.8.1.apk > AI-DocMate-v0.8.1.apk.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: AI-DocMate-v0.8.0-apk
+          name: AI-DocMate-v0.8.1-installable
           path: |
-            AI-DocMate-v0.8.0.apk
-            AI-DocMate-v0.8.0.apk.sha256
+            AI-DocMate-v0.8.1.apk
+            AI-DocMate-v0.8.1.apk.sha256
           if-no-files-found: error
-      - name: Create or update GitHub Release
+      - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view v0.8.0 >/dev/null 2>&1; then
-            gh release upload v0.8.0 AI-DocMate-v0.8.0.apk AI-DocMate-v0.8.0.apk.sha256 --clobber
+          if gh release view v0.8.1 >/dev/null 2>&1; then
+            gh release upload v0.8.1 AI-DocMate-v0.8.1.apk AI-DocMate-v0.8.1.apk.sha256 --clobber
           else
-            gh release create v0.8.0 AI-DocMate-v0.8.0.apk AI-DocMate-v0.8.0.apk.sha256 --target "$GITHUB_SHA" --title "AI DocMate v0.8.0" --generate-notes --prerelease
+            gh release create v0.8.1 AI-DocMate-v0.8.1.apk AI-DocMate-v0.8.1.apk.sha256 --target "$GITHUB_SHA" --title "AI DocMate v0.8.1" --notes "Installable Android APK. APK alignment and cryptographic signature are verified in GitHub Actions before publication." --prerelease
           fi
