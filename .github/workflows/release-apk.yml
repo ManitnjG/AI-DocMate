@@ -42,3 +42,5 @@ jobs:
             Pilot debug APK. Passed backend tests, Android unit tests, lint and emulator integration tests.
             This is not a signed Google Play production release. Physical-device and OCR-quality verification remain required.
           generate_release_notes: true
+
+# manual-release-trigger: 2026-09-23
