@@ -1,70 +1,35 @@
 package com.aidocmate.app
-
-import androidx.compose.foundation.background
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.*
+import androidx.compose.ui.graphics.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
-val DocMateBlue=Color(0xFF087CFF)
-val DocMatePurple=Color(0xFF7C3AED)
-val DocMateCyan=Color(0xFF12D6D0)
-val DocMatePink=Color(0xFFFF3D81)
-val DocMateOrange=Color(0xFFFF8A1F)
-val DocMateGreen=Color(0xFF08B981)
+val DocMateBlue=Color(0xFF087CFF); val DocMatePurple=Color(0xFF7C3AED); val DocMateCyan=Color(0xFF12D6D0)
+val DocMatePink=Color(0xFFFF3D81); val DocMateOrange=Color(0xFFFF8A1F); val DocMateGreen=Color(0xFF08B981)
+private val toolColors=listOf(DocMateBlue,DocMateGreen,DocMatePurple,DocMatePink,DocMateOrange,DocMateCyan)
 
-@Composable
-fun DocMateHero(){
- Card(shape=RoundedCornerShape(24.dp),modifier=Modifier.fillMaxWidth(),colors=CardDefaults.cardColors(containerColor=Color.Transparent)){
-  Box(Modifier.fillMaxWidth().background(Brush.linearGradient(listOf(DocMateBlue,DocMatePurple,DocMateCyan)),RoundedCornerShape(24.dp)).padding(20.dp)){
-   Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
-    Text("Turn any document",color=Color.White,style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.ExtraBold)
-    Text("into useful information",color=Color.White,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold)
-    Text("Scan  •  Edit  •  Convert  •  Ask AI",color=Color.White.copy(alpha=.9f))
-   }
+@Composable fun DocMateHero(){Box(Modifier.fillMaxWidth().background(Brush.linearGradient(listOf(DocMateBlue,DocMatePurple,DocMateCyan)),RoundedCornerShape(24.dp)).padding(20.dp)){Column(verticalArrangement=Arrangement.spacedBy(7.dp)){Text("Turn any document",color=Color.White,style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.ExtraBold);Text("into useful information",color=Color.White,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold);Text("Scan  •  Edit  •  Convert  •  Ask AI",color=Color.White.copy(alpha=.9f))}}}
+@Composable fun ColorTool(label:String,color:Color,onClick:()->Unit){Button(onClick=onClick,modifier=Modifier.height(76.dp).fillMaxWidth(),shape=RoundedCornerShape(18.dp),colors=ButtonDefaults.buttonColors(containerColor=color,contentColor=Color.White),contentPadding=PaddingValues(8.dp)){Text(label,fontWeight=FontWeight.Bold)}}
+@Composable fun DocMateQuickActions(onScan:()->Unit,onEdit:()->Unit,onImport:()->Unit,onAi:()->Unit){Column(verticalArrangement=Arrangement.spacedBy(10.dp)){Row(horizontalArrangement=Arrangement.spacedBy(10.dp)){Box(Modifier.weight(1f)){ColorTool("▣  Scan Document",DocMateBlue,onScan)};Box(Modifier.weight(1f)){ColorTool("✦  AI Assistant",DocMatePurple,onAi)}};Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){Box(Modifier.weight(1f)){ColorTool("Edit PDF",DocMatePink,onEdit)};Box(Modifier.weight(1f)){ColorTool("Import",DocMateGreen,onImport)};Box(Modifier.weight(1f)){ColorTool("OCR",DocMateOrange,onImport)}}}}
+@Composable fun DocMateBottomBar(selected:String,onSelect:(String)->Unit){NavigationBar(containerColor=MaterialTheme.colorScheme.surface,tonalElevation=8.dp){listOf("Home","Files","Add","Tools","AI").forEach{item->NavigationBarItem(selected=selected==item,onClick={onSelect(item)},icon={Surface(shape=RoundedCornerShape(12.dp),color=if(item=="Add")DocMateBlue else Color.Transparent){Text(if(item=="Add")"+" else when(item){"Home"->"⌂";"Files"->"▤";"Tools"->"⊞";else->"✦"},modifier=Modifier.padding(horizontal=if(item=="Add")12.dp else 6.dp,vertical=6.dp),color=if(item=="Add")Color.White else MaterialTheme.colorScheme.onSurface)}},label={if(item!="Add")Text(item)})}}}
+
+@Composable fun ModernDashboard(history:List<SavedDoc>,onScan:()->Unit,onEdit:()->Unit,onImport:()->Unit,onOpenDoc:(SavedDoc)->Unit,onSettings:()->Unit){
+ var page by rememberSaveable{mutableStateOf("Home")};var query by rememberSaveable{mutableStateOf("")}
+ val openTool:(String)->Unit={n->when(n){"Scan to PDF","Camera Scan"->onScan();"Edit PDF","Sign","Add Watermark","Rotate Pages","Reorder Pages","Split PDF","Merge PDF","Compress PDF","Protect PDF"->onEdit();"Images to PDF","Image to PDF","Import Files","OCR"->onImport();"AI Summary","Extract Text","Ask Questions","Translate","Compare"->page="AI";else->onImport()}}
+ Scaffold(containerColor=MaterialTheme.colorScheme.background,topBar={Surface(tonalElevation=2.dp){Row(Modifier.fillMaxWidth().safeDrawingPadding().padding(horizontal=16.dp,vertical=10.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)){Box(Modifier.size(42.dp).background(Brush.linearGradient(listOf(DocMateBlue,DocMatePurple,DocMateCyan)),RoundedCornerShape(14.dp)),contentAlignment=Alignment.Center){Text("AI",color=Color.White,fontWeight=FontWeight.ExtraBold)};Column(Modifier.weight(1f)){Text(if(page=="Home")"AI DocMate" else if(page=="Files")"My Documents" else if(page=="Tools")"All Tools" else "AI Assistant",fontWeight=FontWeight.ExtraBold,style=MaterialTheme.typography.titleLarge);Text(if(page=="Home")"Smart Documents. Smarter You." else if(page=="Tools")"Everything you need in one place" else if(page=="Files")"Your files, organized" else "Ask anything about your documents",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)};IconButton(onClick=onSettings){Text("⚙")}}}},bottomBar={DocMateBottomBar(page){if(it=="Add")onImport() else page=it}}){pad->
+  when(page){
+   "Home"->Column(Modifier.padding(pad).padding(16.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(16.dp)){DocMateHero();DocMateQuickActions(onScan,onEdit,onImport){page="AI"};Text("Quick tools",fontWeight=FontWeight.Bold,style=MaterialTheme.typography.titleMedium);Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)){listOf("Merge PDF","Compress PDF","OCR","Sign","Compare").forEachIndexed{i,n->Button(onClick={openTool(n)},shape=RoundedCornerShape(16.dp),colors=ButtonDefaults.buttonColors(containerColor=toolColors[i%toolColors.size])){Text(n)}}};Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically){Text("Recent Documents",fontWeight=FontWeight.Bold,style=MaterialTheme.typography.titleMedium);TextButton(onClick={page="Files"}){Text("See all")}};if(history.isEmpty())Card(Modifier.fillMaxWidth(),shape=RoundedCornerShape(18.dp)){Text("No documents yet. Scan or import your first file.",Modifier.padding(18.dp))};history.take(4).forEach{d->DocumentRow(d){onOpenDoc(d)}};Spacer(Modifier.height(12.dp))}
+   "Files"->Column(Modifier.padding(pad).padding(16.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(10.dp)){OutlinedTextField(query,{query=it},modifier=Modifier.fillMaxWidth(),singleLine=true,label={Text("Search files")},shape=RoundedCornerShape(18.dp));Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(7.dp)){listOf("All","PDF","Images","Docs","Fav").forEachIndexed{i,x->FilterChip(selected=i==0,onClick={},label={Text(x)})}};history.filter{query.isBlank()||it.name.contains(query,true)||it.pages.any{p->p.text.contains(query,true)}}.forEach{d->DocumentRow(d){onOpenDoc(d)}};if(history.isEmpty())Text("Your imported and scanned documents will appear here.",color=MaterialTheme.colorScheme.onSurfaceVariant)}
+   "Tools"->Column(Modifier.padding(pad).padding(16.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(16.dp)){OutlinedTextField(query,{query=it},modifier=Modifier.fillMaxWidth(),singleLine=true,label={Text("Search tools")},shape=RoundedCornerShape(18.dp));ToolCatalog.tools.filter{query.isBlank()||it.title.contains(query,true)||it.group.contains(query,true)}.groupBy{it.group}.forEach{(group,items)->Text(group,fontWeight=FontWeight.Bold,style=MaterialTheme.typography.titleMedium);items.chunked(2).forEach{row->Row(horizontalArrangement=Arrangement.spacedBy(10.dp)){row.forEach{t->Box(Modifier.weight(1f)){ColorTool(t.title,t.color){openTool(t.title)}}};if(row.size==1)Spacer(Modifier.weight(1f))}}};Spacer(Modifier.height(8.dp))}
+   else->Column(Modifier.padding(pad).padding(16.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)){Box(Modifier.fillMaxWidth().background(Brush.linearGradient(listOf(DocMateBlue,DocMatePurple,DocMatePink)),RoundedCornerShape(28.dp)).padding(22.dp)){Column{Text("✦",color=Color.White,style=MaterialTheme.typography.headlineMedium);Text("How can I help you today?",color=Color.White,fontWeight=FontWeight.ExtraBold,style=MaterialTheme.typography.headlineSmall)}};listOf("Summarize this document","Extract key information","Translate to Tamil","Compare with another file","Explain in simple words","Draft a reply / letter").forEach{q->ElevatedButton(onClick={if(history.isNotEmpty())onOpenDoc(history.first()) else onImport()},modifier=Modifier.fillMaxWidth(),shape=RoundedCornerShape(18.dp)){Text("✦  "+q,Modifier.fillMaxWidth())}};Text(if(history.isEmpty())"Import a document to start AI analysis." else "Open a document to ask custom questions, view citations and conversation history.",color=MaterialTheme.colorScheme.onSurfaceVariant)}
   }
  }
 }
-
-@Composable
-fun ColorTool(label:String,color:Color,onClick:()->Unit){
- Button(onClick=onClick,modifier=Modifier.height(72.dp).fillMaxWidth(),shape=RoundedCornerShape(18.dp),
-  colors=ButtonDefaults.buttonColors(containerColor=color,contentColor=Color.White),
-  contentPadding=PaddingValues(8.dp)){ Text(label,fontWeight=FontWeight.Bold) }
-}
-
-@Composable
-fun DocMateQuickActions(onScan:()->Unit,onEdit:()->Unit,onImport:()->Unit,onAi:()->Unit){
- Column(verticalArrangement=Arrangement.spacedBy(10.dp)){
-  Row(horizontalArrangement=Arrangement.spacedBy(10.dp)){
-   Box(Modifier.weight(1f)){ColorTool("Scan\nDocument",DocMateBlue,onScan)}
-   Box(Modifier.weight(1f)){ColorTool("AI\nAssistant",DocMatePurple,onAi)}
-  }
-  Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-   Box(Modifier.weight(1f)){ColorTool("Edit PDF",DocMatePink,onEdit)}
-   Box(Modifier.weight(1f)){ColorTool("Import",DocMateGreen,onImport)}
-   Box(Modifier.weight(1f)){ColorTool("OCR",DocMateOrange,onImport)}
-  }
- }
-}
-
-@Composable
-fun DocMateBottomBar(selected:String,onSelect:(String)->Unit){
- NavigationBar(containerColor=MaterialTheme.colorScheme.surface,tonalElevation=6.dp){
-  listOf("Home","Files","Add","Tools","AI").forEach { item->
-   NavigationBarItem(selected=selected==item,onClick={onSelect(item)},icon={
-    Surface(shape=RoundedCornerShape(12.dp),color=if(item=="Add") DocMateBlue else Color.Transparent){
-     Text(if(item=="Add") "+" else when(item){"Home"->"⌂";"Files"->"▤";"Tools"->"⊞";else->"✦"},
-      modifier=Modifier.padding(horizontal=if(item=="Add") 12.dp else 6.dp,vertical=6.dp),
-      color=if(item=="Add") Color.White else MaterialTheme.colorScheme.onSurface)
-    }
-   },label={if(item!="Add") Text(item)})
-  }
- }
-}
+@Composable private fun DocumentRow(doc:SavedDoc,onClick:()->Unit){ElevatedCard(Modifier.fillMaxWidth().clickable(onClick=onClick),shape=RoundedCornerShape(18.dp)){Row(Modifier.padding(12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)){Box(Modifier.size(48.dp).background(DocMatePink.copy(alpha=.14f),RoundedCornerShape(13.dp)),contentAlignment=Alignment.Center){Text("PDF",color=DocMatePink,fontWeight=FontWeight.Bold)};Column(Modifier.weight(1f)){Text(doc.name,fontWeight=FontWeight.SemiBold,maxLines=1);Text(doc.pages.size.toString()+" page(s)"+if(doc.favorite)"  •  ★ Favorite" else "",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)};Text("›",style=MaterialTheme.typography.titleLarge)}}}
