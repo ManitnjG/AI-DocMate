@@ -8,6 +8,9 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.horizontalScroll
@@ -28,6 +31,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.ViewModelProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -86,8 +90,12 @@ import kotlin.math.min
     }},confirmButton={TextButton(onClick={languageDialog=false;vm.download(language)}) { Text("Download packs") }},dismissButton={TextButton(onClick={languageDialog=false}) { Text("Done") }})
     editing?.let { mark -> EditorMarkDialog(mark,{editing=null},{updated->editing=null;vm.change { it.putMark(selected,updated) }},{editing=null;vm.change { it.removeMark(selected,mark.id) }}) }
     Column(Modifier.fillMaxSize().safeDrawingPadding().padding(12.dp),verticalArrangement=Arrangement.spacedBy(5.dp)) {
-        Row(verticalAlignment=Alignment.CenterVertically) {
-            TextButton(onClick=onBack){Text("Back")}; Text("Smart Editor",style=MaterialTheme.typography.titleLarge)
+        Surface(tonalElevation=4.dp,shape=RoundedCornerShape(18.dp)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal=8.dp,vertical=5.dp),verticalAlignment=Alignment.CenterVertically) {
+                IconButton(onClick=onBack){Text("‹",style=MaterialTheme.typography.headlineMedium)}
+                Column(Modifier.weight(1f)){Text("Smart Editor",fontWeight=FontWeight.ExtraBold,style=MaterialTheme.typography.titleLarge);Text(if(draft==null) "Open a document" else "Saved automatically",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+                if(draft!=null){IconButton(onClick={vm.change{it.undo()}},enabled=draft.edits.canUndo&&!vm.busy){Text("↶")};Button(onClick={range="1-"+draft.edits.pages.size;rangeDialog=true},enabled=!vm.busy,shape=RoundedCornerShape(14.dp),colors=ButtonDefaults.buttonColors(containerColor=DocMateBlue)){Text("Done")}}
+            }
         }
         Row(Modifier.horizontalScroll(rememberScrollState())) {
             TextButton(onClick={picker.launch(arrayOf("application/pdf","image/jpeg","image/png"))},enabled=!vm.busy && draft==null){Text("Open / merge")}
@@ -101,14 +109,7 @@ import kotlin.math.min
         Text(vm.message,style=MaterialTheme.typography.bodySmall,maxLines=3)
         if(vm.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         if(draft!=null) {
-            Text("Draft saves automatically, including when you leave the editor.",style=MaterialTheme.typography.labelSmall)
-            Row(Modifier.horizontalScroll(rememberScrollState())) {
-                listOf("pan" to "Pan / zoom","select" to "Select","text" to "Add text","ink" to "Signature / pen","highlight" to "Highlight","rectangle" to "Box").forEach { (key,label) ->
-                    FilterChip(selected=tool==key,onClick={tool=key},label={Text(label)},enabled=!vm.busy)
-                }
-                TextButton(onClick={languageDialog=true},enabled=!vm.busy){Text("Language: $language")}
-                TextButton(onClick={tool="select";vm.recognize(language)},enabled=!vm.busy){Text("Edit existing text (OCR)")}
-            }
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){Text("Tap the page to edit",Modifier.weight(1f),style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant);Surface(shape=RoundedCornerShape(20.dp),color=MaterialTheme.colorScheme.surfaceVariant){Text((selected+1).toString()+" / "+draft.edits.pages.size,Modifier.padding(horizontal=12.dp,vertical=6.dp),fontWeight=FontWeight.Bold)}}
         }
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().clipToBounds(),contentAlignment=Alignment.Center) {
             val bitmap=preview
@@ -152,19 +153,21 @@ import kotlin.math.min
             }
         }
         if(draft!=null) {
-            Row(Modifier.horizontalScroll(rememberScrollState()),verticalAlignment=Alignment.CenterVertically) {
-                TextButton(onClick={vm.select(selected-1)},enabled=selected>0 && !vm.busy){Text("Previous")};Text("${selected+1} / ${draft.edits.pages.size}")
-                TextButton(onClick={vm.select(selected+1)},enabled=selected<draft.edits.pages.lastIndex && !vm.busy){Text("Next")}
-                TextButton(onClick={vm.change{it.undo()}},enabled=draft.edits.canUndo && !vm.busy){Text("Undo")}
-                TextButton(onClick={vm.change{it.redo()}},enabled=draft.edits.canRedo && !vm.busy){Text("Redo")}
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.Center,verticalAlignment=Alignment.CenterVertically) {
+                IconButton(onClick={vm.select(selected-1)},enabled=selected>0&&!vm.busy){Text("‹",style=MaterialTheme.typography.headlineSmall)}
+                Text((selected+1).toString()+" / "+draft.edits.pages.size,modifier=Modifier.padding(horizontal=14.dp),fontWeight=FontWeight.Bold)
+                IconButton(onClick={vm.select(selected+1)},enabled=selected<draft.edits.pages.lastIndex&&!vm.busy){Text("›",style=MaterialTheme.typography.headlineSmall)}
             }
-            Row(Modifier.horizontalScroll(rememberScrollState())) {
-                TextButton(onClick={vm.change{it.rotate(selected)}},enabled=!vm.busy){Text("Rotate")}
-                TextButton(onClick={vm.change{it.duplicate(selected)}},enabled=!vm.busy && draft.edits.pages.size<100){Text("Duplicate")}
-                TextButton(onClick={vm.change{it.insertBlank(selected)}},enabled=!vm.busy && draft.edits.pages.size<100){Text("Blank page")}
-                TextButton(onClick={vm.change{it.delete(selected)}},enabled=!vm.busy && draft.edits.pages.size>1){Text("Delete page")}
-                TextButton(onClick={vm.change{it.move(selected,selected-1)}},enabled=!vm.busy && selected>0){Text("Move earlier")}
-                TextButton(onClick={vm.change{it.move(selected,selected+1)}},enabled=!vm.busy && selected<draft.edits.pages.lastIndex){Text("Move later")}
+            Surface(tonalElevation=8.dp,shape=RoundedCornerShape(20.dp)) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(8.dp),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                    listOf("select" to "⌖\nEdit","text" to "T\nText","ocr" to "⌗\nAI OCR","ink" to "✎\nSign","highlight" to "▰\nMarkup","pages" to "▤\nPages").forEach { pair ->
+                        val key=pair.first; val label=pair.second; val active=tool==key
+                        Surface(Modifier.width(68.dp).clickable(enabled=!vm.busy){when(key){"ocr"->{tool="select";vm.recognize(language)};"pages"->vm.change{it.rotate(selected)};else->tool=key}},shape=RoundedCornerShape(16.dp),color=if(active)DocMateBlue.copy(alpha=.18f) else MaterialTheme.colorScheme.surfaceVariant) {
+                            Text(label,Modifier.padding(vertical=9.dp),textAlign=androidx.compose.ui.text.style.TextAlign.Center,fontWeight=if(active)FontWeight.Bold else FontWeight.Medium,color=if(active)DocMateBlue else MaterialTheme.colorScheme.onSurface)
+                        }
+                    }
+                    Surface(Modifier.width(68.dp).clickable{languageDialog=true},shape=RoundedCornerShape(16.dp),color=MaterialTheme.colorScheme.surfaceVariant){Text("⋯\nMore",Modifier.padding(vertical=9.dp),textAlign=androidx.compose.ui.text.style.TextAlign.Center)}
+                }
             }
         }
     }
